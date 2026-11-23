@@ -119,7 +119,12 @@ export async function skimapFromHtml(id, log) {
     .map((tag) => ({ src: absUrl((tag.match(/src=["']([^"']+)/i) || [])[1] || ''), alt: (tag.match(/alt=["']([^"']*)/i) || [])[1] || '' }))
     .filter((x) => /files\.skimap\.org/i.test(x.src));
   log?.push(`area page: ${ids.length} map links: ${ids.join(',')}; links: ${[...html.matchAll(/href=["']([^"']+)/gi)].map((m) => m[1]).filter((h) => /map/i.test(h)).slice(0, 10).join(' | ')}; thumbs: ${thumbs.slice(0, 4).map((t) => `${t.src} [${t.alt}]`).join(' | ')}`);
+  // The area page's og:image is Skimap.org's pick for the current trail map — always lead with it.
+  const og = metaContent(html, 'og:image');
+  const ogAlt = metaContent(html, 'og:image:alt') || metaContent(html, 'twitter:image:alt') || '';
+  const current = og ? [{ id: 'current', year: null, title: ogAlt || 'Current trail map', image: absUrl(og), thumb: absUrl(og), pdf: null, page: `https://skimap.org/SkiAreas/view/${id}` }] : [];
   const maps = [];
+  if (current.length) return current;
   if (!ids.length) {
     return thumbs.slice(0, 6).map((t, i) => ({
       id: i, year: Number((t.alt.match(/\b(19[5-9]\d|20[0-4]\d)\b/) || [])[1]) || null,

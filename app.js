@@ -181,6 +181,7 @@ function renderHome() {
           <div class="rc-title">
             <h2>${esc(r.name)}</h2>
             <div class="sub">${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · ${esc([r.state, r.country].filter(Boolean).join(' · '))}</div>
+            <div class="mstatus" id="status-${r.id}">${statusLine(r)}</div>
             <div class="chips2"><span class="depth" id="depth-${r.id}">${depthChip(r)}</span>${pd ? `<span class="pow" title="Powder alert">❄ Powder alert: ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</div>
           </div>
           ${star}
@@ -227,6 +228,10 @@ function renderHome() {
     const el = document.getElementById(`depth-${r.id}`);
     if (el) el.innerHTML = depthChip(r);
   }));
+  list.forEach((r) => loadStatus(r).then(() => {
+    const el = document.getElementById(`status-${r.id}`);
+    if (el) el.innerHTML = statusLine(r);
+  }));
   list.filter((r) => !state.data[r.id]?.[getLevel()]).forEach((r) => loadOne(r).then(() => location.hash.length <= 2 && renderHome()));
 }
 
@@ -259,6 +264,46 @@ function mountStrips(labels, onlyId) {
     el.scrollLeft = first ? Math.max(0, histW - 18) : prev; // peek a sliver of history
     el.dataset.mounted = '1';
   });
+}
+
+// ---------- open / closed status ----------
+// Live lift counts from Liftie (reads each resort's own lift-status feed), plus the announced opening date.
+const statusCache = new Map();
+async function loadStatus(r) {
+  const c = statusCache.get(r.id);
+  if (c && Date.now() - c.at < 5 * 60e3) return c.data;
+  const q = r.liftie ? `id=${encodeURIComponent(r.liftie)}` : `lat=${r.lat}&lon=${r.lon}&name=${encodeURIComponent(r.name)}`;
+  let data;
+  try { data = await getJSON(`/api/status?${q}`); } catch { data = { error: true }; }
+  statusCache.set(r.id, { at: Date.now(), data });
+  return data;
+}
+
+const fmtDate = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const todayIso = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60e3).toISOString().slice(0, 10);
+
+function statusInfo(r) {
+  const st = statusCache.get(r.id)?.data;
+  const opening = r.opening || (st && st.opening) || null;
+  const future = opening && opening > todayIso();
+  if (st && !st.error && st.found !== false && st.total > 0) {
+    if (st.open > 0) {
+      return { cls: 'open', text: `Open · ${st.open}/${st.total} lifts`, note: st.hold ? `${st.hold} on hold (usually wind/weather)` : '' };
+    }
+    if (st.hold > 0) return { cls: 'hold', text: `On hold · ${st.hold} lift${st.hold > 1 ? 's' : ''} paused`, note: 'Usually wind or weather — check the resort' };
+    if (future) return { cls: 'closed', text: `Closed · Opens ${fmtDate(opening)}` };
+    if (st.scheduled > 0) return { cls: 'sched', text: `Opening soon · ${st.scheduled} lifts scheduled today` };
+    return { cls: 'closed', text: 'Closed today', note: opening ? `Season opened ${fmtDate(opening)} · may be weather, wind or end of day` : 'May be weather, wind, end of day or off-season' };
+  }
+  if (future) return { cls: 'closed', text: `Closed · Opens ${fmtDate(opening)}`, note: 'Expected opening date' };
+  if (!st) return { cls: 'muted', text: 'Checking status…' };
+  if (opening) return { cls: 'muted', text: `Season opened ${fmtDate(opening)}`, note: 'Live lift status unavailable' };
+  return { cls: 'muted', text: 'Live status unavailable' };
+}
+
+function statusLine(r) {
+  const s = statusInfo(r);
+  return `<span class="sdot ${s.cls}"></span><span class="stext ${s.cls}">${esc(s.text)}</span>${s.note ? `<span class="snote"> · ${esc(s.note)}</span>` : ''}`;
 }
 
 // ---------- current snow depth ----------
@@ -358,6 +403,7 @@ function renderResort(r) {
     </div>
     <div class="dtitle">
       <div class="dtitle-row">${badge(r, 'sm')}<h1>${esc(r.name)}</h1></div>
+      <div class="mstatus big" id="status-d">${statusLine(r)}</div>
       <div class="fp">Forecast Point <b>${r.summitFt.toLocaleString()} ft</b> <span class="muted">· base ${r.baseFt.toLocaleString()} ft · ${esc(r.region)}</span></div>
     </div>
     <nav class="tabs" id="tabs">
@@ -449,6 +495,12 @@ function renderResort(r) {
   });
   loadCams(r);
   loadFoodSection(r);
+  loadStatus(r).then((st) => {
+    const el = document.getElementById('status-d');
+    if (!el || location.hash !== `#/resort/${r.id}`) return;
+    const link = (st && st.url) || r.camsUrl || null;
+    el.innerHTML = statusLine(r) + (link ? ` <a class="slink" href="${esc(link)}" target="_blank" rel="noopener">Resort status ↗</a>` : '');
+  });
   // Mount the map only when it's about to scroll into view (saves data).
   // Load trail maps when the section is about to scroll into view (saves data).
   const sm = document.getElementById('skimap');

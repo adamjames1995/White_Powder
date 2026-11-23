@@ -332,3 +332,13 @@ details.fmore summary { cursor: pointer; color: var(--accent); padding: 10px 0; 
 .depth { font-size: 13px; color: var(--text-secondary); }
 .depth b { color: var(--text-primary); }
 .depth:empty { display: none; }
+
+/* open/closed status */
+.mstatus { display: flex; align-items: center; flex-wrap: wrap; gap: 0 4px; margin-top: 4px; font-size: 13px; line-height: 1.35; }
+.mstatus.big { font-size: 15px; margin: 6px 0 2px; }
+.sdot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-right: 4px; background: var(--text-muted); }
+.sdot.open { background: #0ca30c; } .sdot.hold { background: #eda100; } .sdot.sched { background: #eda100; } .sdot.closed { background: #e66767; }
+.stext { font-weight: 600; color: var(--text-secondary); }
+.stext.open { color: #3fc93f; } .stext.hold, .stext.sched { color: #f0b429; } .stext.closed { color: #ef8a8a; }
+.snote { color: var(--text-muted); }
+.slink { margin-left: 6px; font-size: 13px; text-decoration: none; }

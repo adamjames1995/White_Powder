@@ -8,8 +8,9 @@ async function getJson(url) {
   const t = setTimeout(() => ctrl.abort(), 8000);
   try {
     const r = await fetch(url, { signal: ctrl.signal, headers: { 'user-agent': 'WhitePowder/1.0 (personal ski app)', accept: 'application/json' } });
-    if (!r.ok) throw new Error(`Liftie ${r.status}`);
-    return await r.json();
+    const body = await r.text();
+    if (!r.ok) throw new Error(`Liftie ${r.status}: ${body.slice(0, 120)}`);
+    try { return JSON.parse(body); } catch { throw new Error(`Liftie non-JSON: ${body.slice(0, 120)}`); }
   } finally { clearTimeout(t); }
 }
 
@@ -67,6 +68,6 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
     res.status(200).json({ found: true, id, ...summarize(j), source: 'Liftie (liftie.info)', fetchedAt: new Date().toISOString() });
   } catch (e) {
-    res.status(502).json({ error: e.message });
+    res.status(req.query.debug ? 200 : 502).json({ error: e.message || String(e), cause: String(e.cause?.code || e.cause || '') });
   }
 }

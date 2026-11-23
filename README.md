@@ -2,7 +2,7 @@
 
 A personal snow-forecast web app for your phone's home screen. It shows a 16-day snowfall forecast at the base and summit of each resort, current conditions, observed new snow, webcams and powder alerts.
 
-Resorts: Palisades Tahoe, Kirkwood, Whistler Blackcomb, Stevens Pass, Crystal Mountain. To add one, add an entry to `lib/resorts.js`.
+Starts with Palisades Tahoe, Kirkwood, Whistler Blackcomb, Stevens Pass and Crystal Mountain. Each user can add or remove any mountain worldwide (tap **Edit** on the home screen) and keep a ★ favorites list. That list is saved on each phone. Added mountains get their base and summit elevations from terrain data, and the nearest SNOTEL station when there's one within 30 km. The quick-add catalog is in `lib/resorts.js`.
 
 ## How the forecast works
 

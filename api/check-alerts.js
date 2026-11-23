@@ -1,5 +1,5 @@
 // Called on a schedule (GitHub Actions). Checks summit forecasts and pushes powder alerts.
-import { RESORTS, byId } from '../lib/resorts.js';
+import { byId } from '../lib/resorts.js';
 import { fetchForecast, processPoint } from '../lib/snow.js';
 import { redis, allSubs } from './_redis.js';
 import { push } from './_push.js';
@@ -14,29 +14,39 @@ export default async function handler(req, res) {
     const subs = await allSubs();
     if (!subs.length) return res.status(200).json({ subs: 0, sent: 0 });
 
-    const points = RESORTS.map((r) => ({ resort: r.id, lat: r.lat, lon: r.lon, elevFt: r.summitFt }));
-    const locs = await fetchForecast(points, { pastDays: 0, forecastDays: 8, apiKey: process.env.OPEN_METEO_API_KEY });
-    const days = Object.fromEntries(points.map((p, i) => [p.resort, processPoint(locs[i], p.elevFt).days]));
+    // Each subscriber has their own mountains; older subscriptions stored plain ids of the defaults.
+    const asObj = (x) => (typeof x === 'string' ? byId(x) && { id: x, name: byId(x).name, lat: byId(x).lat, lon: byId(x).lon, summitFt: byId(x).summitFt } : x);
+    const key = (r) => `${r.lat.toFixed(3)},${r.lon.toFixed(3)},${Math.round(r.summitFt)}`;
+    const uniq = new Map();
+    for (const s of subs) for (const r of (s.prefs?.resorts || []).map(asObj).filter(Boolean)) uniq.set(key(r), r);
+    const points = [...uniq.entries()].map(([k, r]) => ({ k, lat: r.lat, lon: r.lon, elevFt: r.summitFt }));
+    const daysByKey = {};
+    for (let i = 0; i < points.length; i += 20) {
+      const chunk = points.slice(i, i + 20);
+      const locs = await fetchForecast(chunk, { pastDays: 0, forecastDays: 8, apiKey: process.env.OPEN_METEO_API_KEY });
+      chunk.forEach((p, j) => { daysByKey[p.k] = processPoint(locs[j], p.elevFt).days; });
+    }
 
     let sent = 0, removed = 0;
     const log = [];
     for (const s of subs) {
       const { threshold, withinDays, resorts } = s.prefs || {};
       const hits = [];
-      for (const rid of resorts || []) {
-        const d = (days[rid] || []).slice(0, withinDays || 3).filter((x) => x.snow >= (threshold || 6));
+      for (const r of (resorts || []).map(asObj).filter(Boolean)) {
+        const rid = r.id;
+        const d = (daysByKey[key(r)] || []).slice(0, withinDays || 3).filter((x) => x.snow >= (threshold || 6));
         if (!d.length) continue;
         const best = d.reduce((a, b) => (b.snow > a.snow ? b : a));
         // Alert once per resort per storm day.
         const fresh = await redis('SET', `sent:${s.id}:${rid}:${best.date}`, '1', 'NX', 'EX', 864000);
-        if (fresh === 'OK') hits.push({ rid, ...best });
+        if (fresh === 'OK') hits.push({ rid, name: r.name, ...best });
       }
       if (!hits.length) continue;
       hits.sort((a, b) => b.snow - a.snow);
-      const body = hits.map((h) => `${byId(h.rid).name}: ${Math.round(h.snow)}" ${dow(h.date)} (range ${Math.round(h.min)}–${Math.round(h.max)}")`).join('\n');
+      const body = hits.map((h) => `${h.name}: ${Math.round(h.snow)}" ${dow(h.date)} (range ${Math.round(h.min)}–${Math.round(h.max)}")`).join('\n');
       try {
         await push().sendNotification(s.subscription, JSON.stringify({
-          title: `❄ Powder alert — ${Math.round(hits[0].snow)}" at ${byId(hits[0].rid).name}`,
+          title: `❄ Powder alert — ${Math.round(hits[0].snow)}" at ${hits[0].name}`,
           body,
           tag: `powder-${hits[0].rid}-${hits[0].date}`,
           url: `/#/resort/${hits[0].rid}`,

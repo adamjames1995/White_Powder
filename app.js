@@ -1,12 +1,20 @@
-import { RESORTS, byId, logoUrl } from '/lib/resorts.js';
+import { CATALOG, logoUrl } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS } from '/lib/snow.js';
+import { getMountains, saveMountains, getFavorites, saveFavorites, uniqueId, measureElevations, searchPlaces, nearestSnotel } from '/lib/store.js';
+
+let RESORTS = getMountains();
+let FAVS = getFavorites();
+const byId = (id) => RESORTS.find((r) => r.id === id);
+const VIEW_KEY = 'wp:view:v1';
+const DONATE_KEY = 'wp:donate-seen:v1';
+const VENMO_URL = 'https://venmo.com/u/adamjames95';
 
 window.__wpBooted = true;
 const stage = (s) => window.__wpStage?.(s);
 
 const app = document.getElementById('app');
 const refreshBtn = document.getElementById('refresh');
-const CACHE_KEY = 'snowline:forecast:v2';
+const CACHE_KEY = 'wp:forecast:v3';
 const PREFS_KEY = 'snowline:prefs:v1';
 const FRESH_MS = 30 * 60 * 1000;
 
@@ -56,7 +64,7 @@ async function refresh(force = false) {
   refreshBtn.classList.add('spin');
   try {
     stage('requesting forecast');
-    const data = await loadResorts(RESORTS, { onStage: stage });
+    const data = await loadAll(RESORTS);
     stage('drawing');
     state = { data, fetchedAt: Date.now(), error: null };
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, fetchedAt: state.fetchedAt })); } catch {}
@@ -67,6 +75,27 @@ async function refresh(force = false) {
     refreshBtn.classList.remove('spin');
     safeRender();
   }
+}
+
+/** Fetch forecasts in chunks of 8 mountains (16 points) so each request stays light. */
+async function loadAll(list) {
+  const chunks = [];
+  for (let i = 0; i < list.length; i += 8) chunks.push(list.slice(i, i + 8));
+  const results = await Promise.allSettled(chunks.map((c) => loadResorts(c, { onStage: stage })));
+  const data = {};
+  let err = null;
+  results.forEach((r) => { if (r.status === 'fulfilled') Object.assign(data, r.value); else err = r.reason; });
+  if (!Object.keys(data).length && err) throw err;
+  return data;
+}
+
+/** Load one newly added mountain and merge it in. */
+async function loadOne(r) {
+  try {
+    const d = await loadResorts([r], { onStage: stage });
+    state.data = { ...(state.data || {}), ...d };
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data: state.data, fetchedAt: state.fetchedAt || Date.now() })); } catch {}
+  } catch (e) { console.warn(e); }
 }
 
 function safeRender() {
@@ -91,12 +120,13 @@ function render() {
   document.body.classList.toggle('detail', view === 'resort');
   if (view === 'resort' && byId(id)) return renderResort(byId(id));
   if (view === 'settings') return renderSettings();
+  if (view === 'manage') return renderManage();
   renderHome();
 }
 
 // Shared bar scale across all resorts (history + 15-day forecast) so heights compare honestly.
 function sharedScale() {
-  return Math.max(12, ...RESORTS.flatMap((r) => {
+  return Math.max(12, ...shownList().list.concat(location.hash.startsWith('#/resort/') ? [byId(location.hash.split('/')[2])].filter(Boolean) : []).flatMap((r) => {
     const s = state.data?.[r.id]?.summit;
     return s ? [...historyDays(r, s).map((d) => d.snow), ...s.days.slice(0, 15).map((d) => d.snow)] : [];
   }));
@@ -112,6 +142,12 @@ function historyDays(r, s) {
   });
 }
 
+function shownList() {
+  const view = localStorage.getItem(VIEW_KEY) || 'fav';
+  const favs = RESORTS.filter((r) => FAVS.has(r.id));
+  return { view, list: view === 'fav' ? favs : RESORTS, favCount: favs.length };
+}
+
 function renderHome() {
   if (!state.data) {
     app.innerHTML = state.error
@@ -120,9 +156,13 @@ function renderHome() {
     return;
   }
   const prefs = getPrefs();
-  const cards = RESORTS.map((r) => {
+  const { view, list, favCount } = shownList();
+  const cards = list.map((r) => {
     const s = state.data[r.id]?.summit;
-    if (!s) return '';
+    const star = `<button class="star ${FAVS.has(r.id) ? 'on' : ''}" data-star="${r.id}" aria-label="${FAVS.has(r.id) ? 'Remove from' : 'Add to'} favorites">${FAVS.has(r.id) ? '★' : '☆'}</button>`;
+    if (!s) {
+      return `<div class="card rc"><div class="rc-head">${badge(r)}<div class="rc-title"><h2>${esc(r.name)}</h2><div class="sub">Loading forecast…</div></div>${star}</div></div>`;
+    }
     const pd = prefs.resorts.includes(r.id) ? powderDay(s.days, prefs) : null;
     return `
       <a class="card rc" href="#/resort/${r.id}">
@@ -130,19 +170,45 @@ function renderHome() {
           ${badge(r)}
           <div class="rc-title">
             <h2>${esc(r.name)}</h2>
-            <div class="sub">${r.summitFt.toLocaleString()} ft · ${esc(r.state)} · ${esc(r.country)}</div>
+            <div class="sub">${r.summitFt.toLocaleString()} ft · ${esc([r.state, r.country].filter(Boolean).join(' · '))}</div>
+            ${pd ? `<span class="pow" title="Powder alert">❄ Powder alert: ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}
           </div>
-          ${pd ? `<span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}
+          ${star}
         </div>
         <div class="scroller" data-strip="${r.id}"></div>
       </a>`;
   }).join('');
+  const empty = view === 'fav' && !favCount
+    ? `<div class="card pad"><p>No favorites yet.</p><p class="small muted">Tap ☆ on any mountain under <b>All</b>, or add new mountains with <b>Edit</b>.</p></div>`
+    : !RESORTS.length ? `<div class="card pad"><p>No mountains yet.</p><a class="btn primary" href="#/manage">Add mountains</a></div>` : '';
   app.innerHTML = `
+    <div class="homebar">
+      <div class="seg-ctl" role="tablist">
+        <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favorites</button>
+        <button data-view="all" class="${view === 'all' ? 'on' : ''}">All (${RESORTS.length})</button>
+      </div>
+      <a class="btn sm" href="#/manage">Edit</a>
+    </div>
     <div class="updated">Updated ${ago(state.fetchedAt)} · summit forecasts · swipe left for history${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
-    ${cards}
-    ${legendKey()}`;
+    ${empty}${cards}
+    ${list.length ? legendKey() : ''}
+    <p class="support"><a href="${VENMO_URL}" target="_blank" rel="noopener">♥ Support White Powder</a></p>`;
+
+  app.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => {
+    localStorage.setItem(VIEW_KEY, b.dataset.view); renderHome();
+  }));
+  app.querySelectorAll('[data-star]').forEach((b) => b.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    toggleFav(b.dataset.star); renderHome();
+  }));
   mountStrips(false);
-  RESORTS.forEach((r) => loadObs(r).then(() => mountStrips(false, r.id)));
+  list.forEach((r) => loadObs(r).then(() => mountStrips(false, r.id)));
+  list.filter((r) => !state.data[r.id]).forEach((r) => loadOne(r).then(() => location.hash.length <= 2 && renderHome()));
+}
+
+function toggleFav(id) {
+  FAVS.has(id) ? FAVS.delete(id) : FAVS.add(id);
+  saveFavorites(FAVS);
 }
 
 function legendKey() {
@@ -261,7 +327,7 @@ function renderResort(r) {
     </section>
 
     <section id="sec-cams" class="dsec">
-      <div class="dsec-h"><h2>Cams</h2><a href="${esc(r.camsUrl)}" target="_blank" rel="noopener">Official cams ↗</a></div>
+      <div class="dsec-h"><h2>Cams</h2><a href="${esc(camsLink(r))}" target="_blank" rel="noopener">${r.camsUrl ? 'Official cams' : 'Find cams'} ↗</a></div>
       <div class="card flat"><div class="camrow" id="cams"><p class="small muted">Loading cams…</p></div></div>
     </section>
 
@@ -310,6 +376,8 @@ function renderResort(r) {
   }));
 }
 
+const camsLink = (r) => r.camsUrl || `https://www.google.com/search?q=${encodeURIComponent(`${r.name} ${r.state || ''} ski webcam`)}`;
+
 function snowLevelNote(level, r) {
   if (level == null) return '';
   if (level <= r.baseFt) return 'Snow to base';
@@ -320,7 +388,7 @@ function snowLevelNote(level, r) {
 function reportHtml(r, s) {
   const obs = snotelCache.get(r.id);
   if (!r.snotel || !obs || obs.error) {
-    const why = !r.snotel ? 'No SNOTEL station in BC — showing model estimates.' : !obs ? 'Loading SNOTEL…' : 'SNOTEL unavailable right now — showing model estimates.';
+    const why = !r.snotel ? 'No SNOTEL station nearby — showing model estimates.' : !obs ? 'Loading SNOTEL…' : 'SNOTEL unavailable right now — showing model estimates.';
     return `<div class="tiles">
       <div class="tile"><div class="k">Last 24 h · estimated</div><div class="v">${inch(s.current?.modeled24In)}</div></div>
       <div class="tile"><div class="k">Last 72 h · estimated</div><div class="v">${inch(s.current?.modeled72In)}</div></div>
@@ -354,7 +422,7 @@ async function loadCams(r) {
     camsCache.set(r.id, cams);
   }
   if (!el() || location.hash !== `#/resort/${r.id}`) return;
-  const official = `<a class="cam official" href="${esc(r.camsUrl)}" target="_blank" rel="noopener"><div class="ph">📷</div><span>All ${esc(r.name)} cams ↗</span></a>`;
+  const official = `<a class="cam official" href="${esc(camsLink(r))}" target="_blank" rel="noopener"><div class="ph">📷</div><span>${r.camsUrl ? `All ${esc(r.name)} cams` : `Search ${esc(r.name)} webcams`} ↗</span></a>`;
   el().innerHTML = cams.list.map((c) => `
     <a class="cam" href="${esc(c.link)}" target="_blank" rel="noopener">
       <img src="${esc(c.image)}" alt="${esc(c.title)}" loading="lazy" />
@@ -463,6 +531,140 @@ function hideTips() {
 }
 document.addEventListener('click', hideTips);
 
+// ---------- manage mountains ----------
+let searchSeq = 0;
+function renderManage() {
+  const inList = (c) => RESORTS.some((r) => Math.abs(r.lat - c.lat) < 0.02 && Math.abs(r.lon - c.lon) < 0.02);
+  app.innerHTML = `
+    <div class="mhead"><a class="back" href="#/">‹ Done</a><h1 class="title">My mountains</h1></div>
+    <section class="section">
+      <h3>Your list · ★ = favorite</h3>
+      <div id="mylist">${RESORTS.length ? RESORTS.map((r, i) => `
+        <div class="mrow" data-id="${r.id}">
+          <button class="star ${FAVS.has(r.id) ? 'on' : ''}" data-act="fav" aria-label="Favorite">${FAVS.has(r.id) ? '★' : '☆'}</button>
+          <div class="mname"><b>${esc(r.name)}</b><span class="small muted">${esc([r.state, r.country].filter(Boolean).join(', '))}</span><span class="small muted">${r.baseFt.toLocaleString()}–${r.summitFt.toLocaleString()} ft${r.snotel ? ' · SNOTEL' : ''}</span></div>
+          <button class="ib" data-act="up" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
+          <button class="ib" data-act="down" ${i === RESORTS.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
+          <button class="ib" data-act="edit" aria-label="Edit elevations">✎</button>
+          <button class="ib del" data-act="del" aria-label="Delete">🗑</button>
+        </div>`).join('') : '<p class="small muted">No mountains yet — add some below.</p>'}</div>
+    </section>
+    <section class="section">
+      <h3>Add a mountain</h3>
+      <input id="q" class="search" type="search" placeholder="Search resorts or towns worldwide…" autocomplete="off" />
+      <div id="results"></div>
+      <p class="small muted" style="margin-top:10px">Base and summit elevations are measured from terrain data when you add a mountain — tap ✎ to fine-tune them.</p>
+    </section>
+    <p style="text-align:center"><button class="btn" id="reset">Reset to the original 5</button></p>`;
+
+  const results = document.getElementById('results');
+  const row = (c, src) => `<div class="mrow">
+      <div class="mname"><b>${esc(c.name)}</b><span class="small muted">${esc([c.state, c.country].filter(Boolean).join(', '))}${src === 'geo' ? ' · place search' : ''}</span></div>
+      ${inList(c) ? '<span class="small muted">Added</span>' : `<button class="btn sm primary" data-add='${esc(JSON.stringify(c))}'>+ Add</button>`}
+    </div>`;
+  const showCatalog = (q) => {
+    const t = q.trim().toLowerCase();
+    const cat = CATALOG.filter((c) => !t || `${c.name} ${c.state} ${c.country}`.toLowerCase().includes(t));
+    return (t ? '' : '<div class="small muted" style="margin:10px 0 4px">Popular mountains</div>') + cat.map((c) => row(c, 'cat')).join('');
+  };
+  results.innerHTML = showCatalog('');
+
+  const q = document.getElementById('q');
+  let timer;
+  q.addEventListener('input', () => {
+    const v = q.value;
+    results.innerHTML = showCatalog(v);
+    clearTimeout(timer);
+    if (v.trim().length < 3) return;
+    const seq = ++searchSeq;
+    timer = setTimeout(async () => {
+      const places = await searchPlaces(v.trim()).catch(() => []);
+      if (seq !== searchSeq) return;
+      const extra = places.filter((p) => !CATALOG.some((c) => Math.abs(c.lat - p.lat) < 0.05 && Math.abs(c.lon - p.lon) < 0.05));
+      const catHtml = showCatalog(v);
+      results.innerHTML = (catHtml || '') + (extra.length ? `<div class="small muted" style="margin:12px 0 4px">Places matching “${esc(v)}”</div>${extra.map((p) => row(p, 'geo')).join('')}` : (!catHtml ? '<p class="small muted">No matches.</p>' : ''));
+    }, 350);
+  });
+
+  results.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-add]');
+    if (!b) return;
+    b.disabled = true; b.textContent = 'Adding…';
+    const c = JSON.parse(b.dataset.add);
+    let elev;
+    try { elev = await measureElevations(c.lat, c.lon); } catch { elev = { baseFt: 5000, summitFt: 7000, guessed: true }; }
+    const snotel = c.country === 'USA' ? await nearestSnotel(c.lat, c.lon) : null;
+    const r = {
+      id: uniqueId(c.name, RESORTS), name: c.name, state: c.state || '', country: c.country || '',
+      region: [c.state, c.country].filter(Boolean).join(', '),
+      lat: c.lat, lon: c.lon, baseFt: elev.baseFt, summitFt: elev.summitFt,
+      snotel, camsUrl: null, site: c.site || null, custom: true,
+    };
+    RESORTS.push(r); saveMountains(RESORTS);
+    FAVS.add(r.id); saveFavorites(FAVS);
+    { const p = getPrefs(); if (!p.resorts.includes(r.id)) { p.resorts.push(r.id); setPrefs(p); } syncSub(); }
+    renderManage();
+    if (elev.guessed) alert(`Couldn't measure elevations for ${r.name} — tap ✎ to set base and summit.`);
+    loadOne(r);
+  });
+
+  document.getElementById('mylist').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    const id = b.closest('[data-id]').dataset.id;
+    const i = RESORTS.findIndex((r) => r.id === id);
+    const r = RESORTS[i];
+    const act = b.dataset.act;
+    if (act === 'fav') toggleFav(id);
+    if (act === 'up' && i > 0) [RESORTS[i - 1], RESORTS[i]] = [RESORTS[i], RESORTS[i - 1]];
+    if (act === 'down' && i < RESORTS.length - 1) [RESORTS[i + 1], RESORTS[i]] = [RESORTS[i], RESORTS[i + 1]];
+    if (act === 'del') {
+      if (!confirm(`Remove ${r.name}?`)) return;
+      RESORTS.splice(i, 1); FAVS.delete(id); saveFavorites(FAVS);
+      const p = getPrefs(); p.resorts = p.resorts.filter((x) => x !== id); setPrefs(p); syncSub();
+    }
+    if (act === 'edit') {
+      const base = prompt(`${r.name} — base elevation (ft)`, r.baseFt);
+      if (base === null) return;
+      const top = prompt(`${r.name} — summit elevation (ft)`, r.summitFt);
+      if (top === null) return;
+      const bf = Math.round(Number(base)), sf = Math.round(Number(top));
+      if (!(bf > -1000 && sf > bf && sf < 30000)) { alert('Summit must be higher than base.'); return; }
+      r.baseFt = bf; r.summitFt = sf;
+      if (state.data) delete state.data[r.id];
+      loadOne(r);
+    }
+    saveMountains(RESORTS);
+    renderManage();
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    if (!confirm('Replace your list with the original 5 mountains?')) return;
+    localStorage.removeItem('wp:mountains:v1'); localStorage.removeItem('wp:favorites:v1');
+    RESORTS = getMountains(); FAVS = getFavorites();
+    renderManage(); refresh(true);
+  });
+}
+
+// ---------- first-launch donation note ----------
+function maybeShowDonate() {
+  if (localStorage.getItem(DONATE_KEY)) return;
+  const el = document.createElement('div');
+  el.className = 'modal';
+  el.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="dn-h">
+      <img src="/icons/icon-192.png" alt="" width="56" height="56" style="border-radius:12px" />
+      <h2 id="dn-h">Welcome to White Powder</h2>
+      <p>White Powder is built on donations only, and we'd love your support.</p>
+      <p><b>$5 goes a long way!</b></p>
+      <a class="btn primary block" id="dn-go" href="${VENMO_URL}" target="_blank" rel="noopener">Donate on Venmo · @adamjames95</a>
+      <button class="btn block" id="dn-later">Maybe later</button>
+    </div>`;
+  document.body.appendChild(el);
+  const close = () => { try { localStorage.setItem(DONATE_KEY, '1'); } catch {} el.remove(); };
+  el.querySelector('#dn-go').addEventListener('click', close);
+  el.querySelector('#dn-later').addEventListener('click', close);
+}
+
 // ---------- settings / push ----------
 function urlB64ToUint8Array(b64) {
   const pad = '='.repeat((4 - (b64.length % 4)) % 4);
@@ -476,7 +678,17 @@ async function currentSub() {
   return reg.pushManager.getSubscription();
 }
 
+/** Keep the server's alert list in step with this device's mountains (if alerts are on). */
+async function syncSub() {
+  try { const sub = await currentSub(); if (sub) await postSub({ action: 'save', subscription: sub.toJSON(), prefs: getPrefs() }); } catch {}
+}
+
+function serverPrefs(p) {
+  return { ...p, resorts: p.resorts.map(byId).filter(Boolean).map((r) => ({ id: r.id, name: r.name, lat: r.lat, lon: r.lon, summitFt: r.summitFt })) };
+}
+
 async function postSub(body) {
+  if (body.prefs) body = { ...body, prefs: serverPrefs(body.prefs) };
   const r = await fetch('/api/subscribe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error((await r.text()) || r.status);
   return r.json();
@@ -553,3 +765,4 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 loadCached();
 safeRender();
 refresh();
+setTimeout(maybeShowDonate, 1200);

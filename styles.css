@@ -206,3 +206,32 @@ details.more .legend { margin-top: 8px; }
 .cam.official .ph { aspect-ratio: 16/9; display: grid; place-items: center; font-size: 30px; background: var(--surface-0); }
 
 .brand-ico { border-radius: 7px; }
+
+/* ---------- favorites / manage / donate ---------- */
+.homebar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 2px 2px 6px; }
+.seg-ctl { display: flex; background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
+.seg-ctl button { border: 0; background: none; color: var(--text-secondary); padding: 7px 12px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+.seg-ctl button.on { background: var(--accent); color: #fff; font-weight: 600; }
+.btn.sm { padding: 7px 12px; font-size: 14px; }
+.btn.block { display: flex; width: 100%; margin-top: 10px; }
+.star { flex: none; background: none; border: 0; font-size: 22px; line-height: 1; color: var(--text-muted); cursor: pointer; padding: 4px; }
+.star.on { color: #eda100; }
+.mhead { display: flex; flex-direction: column; }
+.mrow { display: flex; align-items: center; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.mrow:last-child { border-bottom: 0; }
+.mname { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mname b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mname span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib { flex: none; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); cursor: pointer; font-size: 15px; }
+.ib:disabled { opacity: .3; }
+.ib.del { color: #e66767; }
+.search { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); }
+.support { text-align: center; font-size: 13px; margin: 14px 0 0; }
+.support a { color: var(--text-secondary); }
+.modal { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.65); display: grid; place-items: center; padding: 20px; }
+.modal-card { width: 100%; max-width: 360px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 18px; padding: 22px; text-align: center; }
+.modal-card h2 { margin: 12px 0 8px; font-size: 21px; }
+.modal-card p { margin: 6px 0; color: var(--text-secondary); line-height: 1.45; }
+.modal-card p b { color: var(--text-primary); }
+.rc-title .pow { display: inline-block; margin-top: 5px; }
+.ib { width: 32px; height: 32px; }

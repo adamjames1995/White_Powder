@@ -316,3 +316,10 @@ details.fmore summary { cursor: pointer; color: var(--accent); padding: 10px 0; 
 .skimap iframe, .fullmap iframe { width: 100%; height: 100%; border: 0; display: block; }
 .tmv-wrap { overflow: auto; -webkit-overflow-scrolling: touch; border-radius: 12px; background: #fff; max-height: calc(100vh - 230px); touch-action: pan-x pan-y pinch-zoom; }
 .tmv-wrap img { display: block; width: 100%; height: auto; }
+
+/* summit/base toggle */
+.levelbar { display: flex; background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 3px; margin: 2px 2px 10px; }
+.levelbar button { flex: 1; border: 0; background: none; color: var(--text-secondary); padding: 9px 10px; border-radius: 9px; font-size: 15px; font-weight: 600; cursor: pointer; }
+.levelbar button.on { background: var(--accent); color: #fff; }
+.levelbar.sm { margin: 0; flex: none; }
+.levelbar.sm button { flex: none; padding: 5px 9px; font-size: 12px; }

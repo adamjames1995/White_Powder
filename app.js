@@ -8,6 +8,9 @@ let RESORTS = getMountains();
 let FAVS = getFavorites();
 const byId = (id) => RESORTS.find((r) => r.id === id);
 const VIEW_KEY = 'wp:view:v1';
+const LEVEL_KEY = 'wp:level:v1';
+const getLevel = () => (localStorage.getItem(LEVEL_KEY) === 'base' ? 'base' : 'summit');
+const levelFt = (r, lvl = getLevel()) => (lvl === 'base' ? r.baseFt : r.summitFt);
 const DONATE_KEY = 'wp:donate-seen:v1';
 const VENMO_URL = 'https://venmo.com/u/adamjames95';
 
@@ -133,7 +136,7 @@ function render() {
 // Shared bar scale across all resorts (history + 15-day forecast) so heights compare honestly.
 function sharedScale() {
   return Math.max(12, ...shownList().list.concat(location.hash.startsWith('#/resort/') ? [byId(location.hash.split('/')[2])].filter(Boolean) : []).flatMap((r) => {
-    const s = state.data?.[r.id]?.summit;
+    const s = state.data?.[r.id]?.[getLevel()];
     return s ? [...historyDays(r, s).map((d) => d.snow), ...s.days.slice(0, 15).map((d) => d.snow)] : [];
   }));
 }
@@ -164,7 +167,7 @@ function renderHome() {
   const prefs = getPrefs();
   const { view, list, favCount } = shownList();
   const cards = list.map((r) => {
-    const s = state.data[r.id]?.summit;
+    const s = state.data[r.id]?.[getLevel()];
     const star = `<button class="star ${FAVS.has(r.id) ? 'on' : ''}" data-star="${r.id}" aria-label="${FAVS.has(r.id) ? 'Remove from' : 'Add to'} favorites">${FAVS.has(r.id) ? '★' : '☆'}</button>`;
     if (!s) {
       return `<div class="card rc"><div class="rc-head">${badge(r)}<div class="rc-title"><h2>${esc(r.name)}</h2><div class="sub">Loading forecast…</div></div>${star}</div></div>`;
@@ -176,7 +179,7 @@ function renderHome() {
           ${badge(r)}
           <div class="rc-title">
             <h2>${esc(r.name)}</h2>
-            <div class="sub">${r.summitFt.toLocaleString()} ft · ${esc([r.state, r.country].filter(Boolean).join(' · '))}</div>
+            <div class="sub">${getLevel() === 'base' ? 'Base' : 'Summit'} ${levelFt(r).toLocaleString()} ft · ${esc([r.state, r.country].filter(Boolean).join(' · '))}</div>
             ${pd ? `<span class="pow" title="Powder alert">❄ Powder alert: ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}
           </div>
           ${star}
@@ -187,7 +190,12 @@ function renderHome() {
   const empty = view === 'fav' && !favCount
     ? `<div class="card pad"><p>No favorites yet.</p><p class="small muted">Tap ☆ on any mountain under <b>All</b>, or add new mountains with <b>Edit</b>.</p></div>`
     : !RESORTS.length ? `<div class="card pad"><p>No mountains yet.</p><a class="btn primary" href="#/manage">Add mountains</a></div>` : '';
+  const lvl = getLevel();
   app.innerHTML = `
+    <div class="levelbar" role="radiogroup" aria-label="Forecast elevation">
+      <button data-level="summit" class="${lvl === 'summit' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'summit'}">▲ Summit</button>
+      <button data-level="base" class="${lvl === 'base' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'base'}">▼ Base</button>
+    </div>
     <div class="homebar">
       <div class="seg-ctl" role="tablist">
         <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favorites</button>
@@ -195,13 +203,16 @@ function renderHome() {
       </div>
       <a class="btn sm" href="#/manage">Edit</a>
     </div>
-    <div class="updated">Updated ${ago(state.fetchedAt)} · summit forecasts · swipe left for history${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
+    <div class="updated">Updated ${ago(state.fetchedAt)} · ${lvl} snowfall · swipe left for history${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
     ${empty}${cards}
     ${list.length ? legendKey() : ''}
     <p class="support"><a href="${VENMO_URL}" target="_blank" rel="noopener">♥ Support White Powder</a></p>`;
 
   app.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => {
     localStorage.setItem(VIEW_KEY, b.dataset.view); renderHome();
+  }));
+  app.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => {
+    localStorage.setItem(LEVEL_KEY, b.dataset.level); renderHome();
   }));
   app.querySelectorAll('[data-star]').forEach((b) => b.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation();
@@ -232,7 +243,7 @@ function mountStrips(labels, onlyId) {
   document.querySelectorAll('[data-strip]').forEach((el) => {
     const r = byId(el.dataset.strip);
     if (!r || (onlyId && r.id !== onlyId)) return;
-    const s = state.data[r.id].summit;
+    const s = state.data[r.id][getLevel()];
     const first = !el.dataset.mounted;
     const prev = el.scrollLeft;
     el.innerHTML = snowStrip(historyDays(r, s), s.days.slice(0, 15), last24Box(r, s), scale, labels || el.dataset.labels === '1');
@@ -317,7 +328,11 @@ function renderResort(r) {
     </nav>
 
     <section id="sec-summary" class="dsec">
-      <div class="dsec-h"><h2>Snow Summary</h2><span class="muted small">Updated ${ago(state.fetchedAt)}</span></div>
+      <div class="dsec-h"><h2>Snow Summary</h2>
+        <div class="levelbar sm" role="radiogroup" aria-label="Forecast elevation">
+          <button data-level="summit" class="${getLevel() === 'summit' ? 'on' : ''}">Summit ${r.summitFt.toLocaleString()}'</button>
+          <button data-level="base" class="${getLevel() === 'base' ? 'on' : ''}">Base ${r.baseFt.toLocaleString()}'</button>
+        </div></div>
       <div class="card flat">
         <div class="scroller" data-strip="${r.id}" data-labels="1"></div>
         <div class="ddlinks"><a class="btn sm" href="#/resort/${r.id}/daily">Detailed daily forecast ›</a><a class="btn sm" href="#/resort/${r.id}/hourly/${s.days[0]?.date || ''}">Hourly ›</a></div>
@@ -375,6 +390,12 @@ function renderResort(r) {
     </section>`;
 
   mountStrips(true);
+  app.querySelectorAll('.dsec [data-level]').forEach((b) => b.addEventListener('click', () => {
+    localStorage.setItem(LEVEL_KEY, b.dataset.level);
+    app.querySelectorAll('.dsec [data-level]').forEach((x) => x.classList.toggle('on', x === b));
+    const el = document.querySelector('[data-strip]'); if (el) delete el.dataset.mounted;
+    mountStrips(true);
+  }));
   document.querySelector('[data-strip]')?.addEventListener('click', (e) => {
     const c = e.target.closest('.col[data-date]');
     if (c) location.hash = `#/resort/${r.id}/hourly/${c.dataset.date}`;

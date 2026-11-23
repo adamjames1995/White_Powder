@@ -60,12 +60,13 @@ test('warm day produces no snow', () => {
   assert.ok(out.days.every((d) => d.snow === 0));
 });
 
-test('forecast URL has 10 points for 5 resorts and right elevation in meters', () => {
+test('forecast URL has 15 points for 5 resorts and right elevation in meters', () => {
   const pts = resortPoints(RESORTS);
-  assert.equal(pts.length, 10);
+  assert.equal(pts.length, 15);
   const u = new URL(forecastUrl(pts));
-  assert.equal(u.searchParams.get('elevation').split(',').length, 10);
-  assert.equal(u.searchParams.get('elevation').split(',')[1], String(Math.round(9050 / 3.28084)));
+  assert.equal(u.searchParams.get('elevation').split(',').length, 15);
+  assert.equal(u.searchParams.get('elevation').split(',')[2], String(Math.round(9050 / 3.28084)));
+  assert.equal(u.searchParams.get('elevation').split(',')[1], String(Math.round(7625 / 3.28084)));
   assert.equal(u.searchParams.get('forecast_days'), '16');
 });
 

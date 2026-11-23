@@ -1,5 +1,5 @@
 import { CATALOG, logoUrl } from '/lib/resorts.js';
-import { loadResorts, sumDays, MODELS } from '/lib/snow.js';
+import { loadResorts, sumDays, MODELS, midFt } from '/lib/snow.js';
 import { fetchDetail, compass } from '/lib/detail.js';
 import { foodQuery, fetchOverpass, buildFood } from '/lib/food.js';
 import { getMountains, saveMountains, getFavorites, saveFavorites, uniqueId, measureElevations, searchPlaces, nearestSnotel } from '/lib/store.js';
@@ -9,8 +9,9 @@ let FAVS = getFavorites();
 const byId = (id) => RESORTS.find((r) => r.id === id);
 const VIEW_KEY = 'wp:view:v1';
 const LEVEL_KEY = 'wp:level:v1';
-const getLevel = () => (localStorage.getItem(LEVEL_KEY) === 'base' ? 'base' : 'summit');
-const levelFt = (r, lvl = getLevel()) => (lvl === 'base' ? r.baseFt : r.summitFt);
+const LEVELS = { summit: 'Summit', mid: 'Mid', base: 'Base' };
+const getLevel = () => { const v = localStorage.getItem(LEVEL_KEY); return LEVELS[v] ? v : 'summit'; };
+const levelFt = (r, lvl = getLevel()) => (lvl === 'base' ? r.baseFt : lvl === 'mid' ? midFt(r) : r.summitFt);
 const DONATE_KEY = 'wp:donate-seen:v1';
 const VENMO_URL = 'https://venmo.com/u/adamjames95';
 
@@ -19,7 +20,7 @@ const stage = (s) => window.__wpStage?.(s);
 
 const app = document.getElementById('app');
 const refreshBtn = document.getElementById('refresh');
-const CACHE_KEY = 'wp:forecast:v3';
+const CACHE_KEY = 'wp:forecast:v4';
 const PREFS_KEY = 'snowline:prefs:v1';
 const FRESH_MS = 30 * 60 * 1000;
 
@@ -179,7 +180,7 @@ function renderHome() {
           ${badge(r)}
           <div class="rc-title">
             <h2>${esc(r.name)}</h2>
-            <div class="sub">${getLevel() === 'base' ? 'Base' : 'Summit'} ${levelFt(r).toLocaleString()} ft · ${esc([r.state, r.country].filter(Boolean).join(' · '))}</div>
+            <div class="sub">${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · ${esc([r.state, r.country].filter(Boolean).join(' · '))}</div>
             ${pd ? `<span class="pow" title="Powder alert">❄ Powder alert: ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}
           </div>
           ${star}
@@ -194,6 +195,7 @@ function renderHome() {
   app.innerHTML = `
     <div class="levelbar" role="radiogroup" aria-label="Forecast elevation">
       <button data-level="summit" class="${lvl === 'summit' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'summit'}">▲ Summit</button>
+      <button data-level="mid" class="${lvl === 'mid' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'mid'}">◆ Mid</button>
       <button data-level="base" class="${lvl === 'base' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'base'}">▼ Base</button>
     </div>
     <div class="homebar">
@@ -220,7 +222,7 @@ function renderHome() {
   }));
   mountStrips(false);
   list.forEach((r) => loadObs(r).then(() => mountStrips(false, r.id)));
-  list.filter((r) => !state.data[r.id]).forEach((r) => loadOne(r).then(() => location.hash.length <= 2 && renderHome()));
+  list.filter((r) => !state.data[r.id]?.[getLevel()]).forEach((r) => loadOne(r).then(() => location.hash.length <= 2 && renderHome()));
 }
 
 function toggleFav(id) {
@@ -243,7 +245,8 @@ function mountStrips(labels, onlyId) {
   document.querySelectorAll('[data-strip]').forEach((el) => {
     const r = byId(el.dataset.strip);
     if (!r || (onlyId && r.id !== onlyId)) return;
-    const s = state.data[r.id][getLevel()];
+    const s = state.data[r.id]?.[getLevel()];
+    if (!s) return;
     const first = !el.dataset.mounted;
     const prev = el.scrollLeft;
     el.innerHTML = snowStrip(historyDays(r, s), s.days.slice(0, 15), last24Box(r, s), scale, labels || el.dataset.labels === '1');
@@ -330,8 +333,7 @@ function renderResort(r) {
     <section id="sec-summary" class="dsec">
       <div class="dsec-h"><h2>Snow Summary</h2>
         <div class="levelbar sm" role="radiogroup" aria-label="Forecast elevation">
-          <button data-level="summit" class="${getLevel() === 'summit' ? 'on' : ''}">Summit ${r.summitFt.toLocaleString()}'</button>
-          <button data-level="base" class="${getLevel() === 'base' ? 'on' : ''}">Base ${r.baseFt.toLocaleString()}'</button>
+          ${Object.entries(LEVELS).map(([k, label]) => `<button data-level="${k}" class="${getLevel() === k ? 'on' : ''}">${label} ${levelFt(r, k).toLocaleString()}'</button>`).join('')}
         </div></div>
       <div class="card flat">
         <div class="scroller" data-strip="${r.id}" data-labels="1"></div>

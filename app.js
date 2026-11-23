@@ -281,7 +281,7 @@ function renderResort(r) {
 
   document.getElementById('share').addEventListener('click', async () => {
     const text = `${r.name}: ${inch(sumDays(s.days, 0, 5))} next 5 days (summit)`;
-    try { if (navigator.share) await navigator.share({ title: 'Snowline', text, url: location.href }); else await navigator.clipboard.writeText(`${text} ${location.href}`); } catch {}
+    try { if (navigator.share) await navigator.share({ title: 'White Powder', text, url: location.href }); else await navigator.clipboard.writeText(`${text} ${location.href}`); } catch {}
   });
 
   const tabs = [...document.querySelectorAll('#tabs a')];
@@ -486,7 +486,7 @@ async function renderSettings() {
       <p class="small muted">Each storm alerts once per resort per day. Checks run twice daily (about 6 am and 6 pm Pacific).</p>
     </section>
     <section class="section stack" id="push-box">
-      ${!pushOK ? `<div class="note">${standalone ? 'This device doesn\'t support web push.' : 'On iPhone: tap Share → <b>Add to Home Screen</b>, then open Snowline from your home screen to turn on alerts.'}</div>` : ''}
+      ${!pushOK ? `<div class="note">${standalone ? 'This device doesn\'t support web push.' : 'On iPhone: tap Share → <b>Add to Home Screen</b>, then open White Powder from your home screen to turn on alerts.'}</div>` : ''}
       ${pushOK && !sub ? `<button class="btn primary" id="enable">Turn on alerts on this device</button>` : ''}
       ${pushOK && sub ? `<div class="note">✓ Alerts are on for this device.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="test">Send test alert</button><button class="btn" id="disable">Turn off</button></div>` : ''}

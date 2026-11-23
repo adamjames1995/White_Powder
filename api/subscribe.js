@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     }
     if (action === 'test') {
       await push().sendNotification(subscription, JSON.stringify({
-        title: 'Snowline test ❄',
+        title: 'White Powder test ❄',
         body: 'Alerts are working on this device.',
         url: '/#/settings',
       }));

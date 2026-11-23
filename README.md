@@ -1,4 +1,4 @@
-# Snowline
+# White Powder
 
 A personal snow-forecast web app for your phone's home screen. It shows a 16-day snowfall forecast at the base and summit of each resort, current conditions, observed new snow, webcams and powder alerts.
 
@@ -34,7 +34,7 @@ Limitations: base and summit share one model grid cell, so their precipitation i
    - `CRON_SECRET`: the same value as in Vercel
 
    The workflow runs at about 6 am and 6 pm Pacific. Trigger it manually from Actions → Powder alerts → Run workflow to test it.
-7. **On each iPhone:** Open the URL in Safari, tap Share → **Add to Home Screen**, and open Snowline from the home screen. Then tap 🔔 → *Turn on alerts* → *Send test alert*.
+7. **On each iPhone:** Open the URL in Safari, tap Share → **Add to Home Screen**, and open White Powder from the home screen. Then tap 🔔 → *Turn on alerts* → *Send test alert*.
 
 ## Notes
 

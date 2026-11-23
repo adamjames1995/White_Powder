@@ -1,4 +1,4 @@
-const CACHE = 'snowline-shell-v4';
+const CACHE = 'whitepowder-shell-v5';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/lib/snow.js', '/lib/resorts.js', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -28,9 +28,9 @@ self.addEventListener('fetch', (e) => {
 
 self.addEventListener('push', (e) => {
   let data = {};
-  try { data = e.data.json(); } catch { data = { title: 'Snowline', body: e.data?.text() }; }
+  try { data = e.data.json(); } catch { data = { title: 'White Powder', body: e.data?.text() }; }
   e.waitUntil(
-    self.registration.showNotification(data.title || 'Snowline', {
+    self.registration.showNotification(data.title || 'White Powder', {
       body: data.body || '',
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',

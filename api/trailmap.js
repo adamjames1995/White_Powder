@@ -106,6 +106,32 @@ export function extractMaps(record) {
   return maps.sort((a, b) => (b.year || 0) - (a.year || 0));
 }
 
+const absUrl = (u, base = 'https://skimap.org') => (u.startsWith('//') ? `https:${u}` : u.startsWith('/') ? base + u : u);
+const metaContent = (html, prop) => (html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${prop}["'][^>]*content=["']([^"']+)`, 'i'))
+  || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*(?:property|name)=["']${prop}["']`, 'i')) || [])[1];
+
+/** Skimap.org only serves HTML to us: list the area's map pages, then read each map's image. */
+export async function skimapFromHtml(id, log) {
+  const html = await get(`https://skimap.org/SkiAreas/view/${id}`, { json: false });
+  const ids = [...new Set([...html.matchAll(/SkiMaps\/view\/(\d+)/g)].map((m) => m[1]))].slice(0, 5);
+  log?.push(`area page: ${ids.length} map links: ${ids.join(',')}; imgs: ${[...html.matchAll(/<img[^>]+src=["']([^"']+)/gi)].map((m) => m[1]).slice(0, 8).join(' | ')}`);
+  const maps = [];
+  for (const mid of ids) {
+    try {
+      const page = await get(`https://skimap.org/SkiMaps/view/${mid}`, { json: false, ms: 10000 });
+      const imgs = [...page.matchAll(/(?:src|href)=["']([^"']+\.(?:jpe?g|png|webp))["']/gi)].map((m) => absUrl(m[1]));
+      const og = metaContent(page, 'og:image');
+      const image = imgs.find((u) => /(full|large|original)/i.test(u)) || og || imgs.sort((a, b) => b.length - a.length)[0];
+      const thumb = og || imgs.find((u) => /(thumb|small|medium)/i.test(u)) || image;
+      const year = Number(((metaContent(page, 'og:title') || '') + ' ' + ((page.match(/<title>([^<]+)/i) || [])[1] || '')).match(/\b(19[5-9]\d|20[0-4]\d)\b/)?.[1]) || null;
+      const pdf = (page.match(/(?:href)=["']([^"']+\.pdf)["']/i) || [])[1];
+      log?.push(`map ${mid}: og=${og || '-'} imgs=${imgs.slice(0, 4).join(' | ')}`);
+      if (image) maps.push({ id: mid, year, image: absUrl(image), thumb: absUrl(thumb), pdf: pdf ? absUrl(pdf) : null, page: `https://skimap.org/SkiMaps/view/${mid}` });
+    } catch (e) { log?.push(`map ${mid}: ${e.message}`); }
+  }
+  return maps.sort((a, b) => (b.year || 0) - (a.year || 0));
+}
+
 export default async function handler(req, res) {
   const lat = Number(req.query.lat), lon = Number(req.query.lon), name = String(req.query.name || '').slice(0, 80);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
@@ -118,21 +144,8 @@ export default async function handler(req, res) {
     if (!area) log.push('no OpenSkiMap ski area near this point');
   } catch (e) { log.push(`openskimap: ${e.message}`); }
   if (area?.skimapId) {
-    const id = area.skimapId;
-    for (const url of [`https://skimap.org/SkiAreas/view/${id}.xml`, `https://skimap.org/SkiAreas/view/${id}.json`, `https://skimap.org/SkiAreas/view/${id}`]) {
-      try {
-        const body = await get(url, { json: false });
-        if (req.query.debug) log.push(`${url} ok ${body.length}b: ${body.slice(0, 300).replace(/\s+/g, ' ')}`);
-        if (/\.xml$/.test(url)) { maps = mapsFromXml(body).slice(0, 8); if (maps.length) break; continue; }
-        let rec; try { rec = JSON.parse(body); } catch { rec = null; }
-        if (rec) { maps = extractMaps(rec).slice(0, 8); if (req.query.debug) log.push(`keys: ${Object.keys(rec).join(',')}; sample: ${JSON.stringify(rec.ski_maps?.[0] || rec).slice(0, 400)}`); }
-        else { // HTML page: scrape image links as a last resort
-          const imgs = [...new Set((body.match(/(?:https?:)?\/\/[^"' )]+\.(?:jpe?g|png|webp)/gi) || []).map((u) => (u.startsWith('//') ? `https:${u}` : u)).filter((u) => /skimap/i.test(u)))];
-          maps = imgs.slice(0, 6).map((u) => ({ image: u, thumb: u, year: null, page: `https://skimap.org/SkiAreas/view/${area.skimapId}` }));
-        }
-        if (maps.length) break;
-      } catch (e) { log.push(`skimap: ${e.message}`); }
-    }
+    try { maps = await skimapFromHtml(area.skimapId, req.query.debug ? log : null); }
+    catch (e) { log.push(`skimap: ${e.message}`); }
   }
   res.setHeader('Cache-Control', area ? 's-maxage=604800, stale-while-revalidate=2592000' : 'no-store');
   res.status(200).json({

@@ -59,9 +59,19 @@ async function refresh(force = false) {
     state.error = e.message || String(e);
   } finally {
     refreshBtn.classList.remove('spin');
-    render();
+    safeRender();
   }
 }
+
+function safeRender() {
+  try { render(); }
+  catch (e) {
+    console.error(e);
+    app.innerHTML = `<div class="pad"><p class="err">Something broke while drawing the page:</p><pre class="small" style="white-space:pre-wrap">${esc(e && (e.stack || e.message) || e)}</pre><button class="btn" onclick="location.reload()">Reload</button></div>`;
+  }
+}
+window.addEventListener('error', (e) => { if (!state.data) app.innerHTML = `<p class="pad err">Error: ${esc(e.message)}</p>`; });
+window.addEventListener('unhandledrejection', (e) => { if (!state.data) app.innerHTML = `<p class="pad err">Error: ${esc(e.reason?.message || e.reason)}</p>`; });
 
 async function getJSON(url) {
   const r = await fetch(url);
@@ -99,7 +109,7 @@ function historyDays(r, s) {
 function renderHome() {
   if (!state.data) {
     app.innerHTML = state.error
-      ? `<p class="pad err">Couldn't load the forecast (${esc(state.error)}). Tap ↻ to retry.</p>`
+      ? `<div class="pad"><p class="err">Couldn't load the forecast.</p><p class="small muted">${esc(state.error)}</p><button class="btn" onclick="location.reload()">Try again</button></div>`
       : `<p class="pad muted">Loading forecast…</p>`;
     return;
   }
@@ -531,9 +541,9 @@ async function renderSettings() {
 
 // ---------- boot ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); });
+window.addEventListener('hashchange', () => { window.scrollTo(0, 0); safeRender(); });
 refreshBtn.addEventListener('click', () => refresh(true));
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
 loadCached();
-render();
+safeRender();
 refresh();

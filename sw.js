@@ -1,4 +1,4 @@
-const CACHE = 'whitepowder-shell-v5';
+const CACHE = 'whitepowder-shell-v6';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/lib/snow.js', '/lib/resorts.js', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {

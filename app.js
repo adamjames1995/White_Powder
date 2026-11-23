@@ -1,6 +1,7 @@
 import { CATALOG, logoUrl } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS } from '/lib/snow.js';
 import { fetchDetail, compass } from '/lib/detail.js';
+import { foodQuery, fetchOverpass, buildFood } from '/lib/food.js';
 import { getMountains, saveMountains, getFavorites, saveFavorites, uniqueId, measureElevations, searchPlaces, nearestSnotel } from '/lib/store.js';
 
 let RESORTS = getMountains();
@@ -581,10 +582,24 @@ const KIND_LABEL = { restaurant: 'Restaurant', cafe: 'Café', bar: 'Bar', pub: '
 const miles = (k) => (k < 0.2 ? `${Math.round(k * 3281)} ft` : `${(k * 0.621371).toFixed(k < 16 ? 1 : 0)} mi`);
 const foodCache = new Map();
 
+const FOOD_KEY = (r) => `wp:food:v2:${r.lat.toFixed(3)},${r.lon.toFixed(3)}`;
 async function getFood(r) {
   const c = foodCache.get(r.id);
   if (c) return c;
-  const p = getJSON(`/api/food?lat=${r.lat}&lon=${r.lon}`).catch((e) => ({ error: e.message, slopeside: [], town: [] }));
+  const p = (async () => {
+    try { // saved on this phone for a week
+      const saved = JSON.parse(localStorage.getItem(FOOD_KEY(r)) || 'null');
+      if (saved && Date.now() - saved.at < 7 * 864e5) return saved.data;
+    } catch {}
+    let data;
+    try { data = buildFood(await fetchOverpass(foodQuery(r.lat, r.lon)), r.lat, r.lon); } // straight from OpenStreetMap
+    catch (e1) {
+      try { data = await getJSON(`/api/food?lat=${r.lat}&lon=${r.lon}`); } // server fallback
+      catch (e2) { return { error: e1.message || String(e1), slopeside: [], town: [] }; }
+    }
+    if (!data.error) try { localStorage.setItem(FOOD_KEY(r), JSON.stringify({ at: Date.now(), data })); } catch {}
+    return data;
+  })();
   foodCache.set(r.id, p);
   const v = await p;
   if (v.error) foodCache.delete(r.id);

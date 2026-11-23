@@ -113,13 +113,23 @@ const metaContent = (html, prop) => (html.match(new RegExp(`<meta[^>]+(?:propert
 /** Skimap.org only serves HTML to us: list the area's map pages, then read each map's image. */
 export async function skimapFromHtml(id, log) {
   const html = await get(`https://skimap.org/SkiAreas/view/${id}`, { json: false });
-  const ids = [...new Set([...html.matchAll(/SkiMaps\/view\/(\d+)/g)].map((m) => m[1]))].slice(0, 5);
-  log?.push(`area page: ${ids.length} map links: ${ids.join(',')}; imgs: ${[...html.matchAll(/<img[^>]+src=["']([^"']+)/gi)].map((m) => m[1]).slice(0, 8).join(' | ')}`);
+  const ids = [...new Set([...html.matchAll(/\/skimaps\/(?:view\/)?(\d+)/gi)].map((m) => m[1]))].slice(0, 5);
+  // Map thumbnails on the area page (files.skimap.org/<key>, no extension), with alt/nearby text.
+  const thumbs = [...html.matchAll(/<img[^>]+>/gi)].map((m) => m[0])
+    .map((tag) => ({ src: absUrl((tag.match(/src=["']([^"']+)/i) || [])[1] || ''), alt: (tag.match(/alt=["']([^"']*)/i) || [])[1] || '' }))
+    .filter((x) => /files\.skimap\.org/i.test(x.src));
+  log?.push(`area page: ${ids.length} map links: ${ids.join(',')}; links: ${[...html.matchAll(/href=["']([^"']+)/gi)].map((m) => m[1]).filter((h) => /map/i.test(h)).slice(0, 10).join(' | ')}; thumbs: ${thumbs.slice(0, 4).map((t) => `${t.src} [${t.alt}]`).join(' | ')}`);
   const maps = [];
+  if (!ids.length) {
+    return thumbs.slice(0, 6).map((t, i) => ({
+      id: i, year: Number((t.alt.match(/\b(19[5-9]\d|20[0-4]\d)\b/) || [])[1]) || null,
+      image: t.src, thumb: t.src, pdf: null, page: `https://skimap.org/SkiAreas/view/${id}`,
+    })).sort((a, b) => (b.year || 0) - (a.year || 0));
+  }
   for (const mid of ids) {
     try {
-      const page = await get(`https://skimap.org/SkiMaps/view/${mid}`, { json: false, ms: 10000 });
-      const imgs = [...page.matchAll(/(?:src|href)=["']([^"']+\.(?:jpe?g|png|webp))["']/gi)].map((m) => absUrl(m[1]));
+      const page = await get(`https://skimap.org/skimaps/${mid}`, { json: false, ms: 10000 }).catch(() => get(`https://skimap.org/SkiMaps/view/${mid}`, { json: false, ms: 10000 }));
+      const imgs = [...page.matchAll(/(?:src|href)=["']([^"']*(?:files\.skimap\.org\/[^"']+|\.(?:jpe?g|png|webp)))["']/gi)].map((m) => absUrl(m[1]));
       const og = metaContent(page, 'og:image');
       const image = imgs.find((u) => /(full|large|original)/i.test(u)) || og || imgs.sort((a, b) => b.length - a.length)[0];
       const thumb = og || imgs.find((u) => /(thumb|small|medium)/i.test(u)) || image;

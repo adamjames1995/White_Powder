@@ -8,7 +8,8 @@ async function get(url, { ms = 15000, json = true } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
   try {
-    const r = await fetch(url, { headers: { 'user-agent': UA, accept: '*/*' }, signal: ctrl.signal });
+    const accept = /\.xml$/.test(url) ? 'application/xml,text/xml;q=0.9,*/*;q=0.8' : /\.json$/.test(url) ? 'application/json,*/*;q=0.8' : 'text/html,*/*;q=0.8';
+    const r = await fetch(url, { headers: { 'user-agent': UA, accept }, signal: ctrl.signal });
     if (!r.ok) throw new Error(`${new URL(url).host}${new URL(url).pathname} → ${r.status}`);
     return json ? await r.json() : await r.text();
   } catch (e) {
@@ -58,6 +59,27 @@ export function pickSkiArea(features, lat, lon, name) {
   return best;
 }
 
+/** Skimap.org XML: collect image URLs and years from each <skiMap> block (structure-agnostic). */
+export function mapsFromXml(xml) {
+  const out = [];
+  const blocks = xml.match(/<skiMap\b[\s\S]*?<\/skiMap>|<skiMap\b[^>]*\/>/gi) || [];
+  for (const b of blocks) {
+    const urls = [...new Set((b.match(/https?:\/\/[^"'<> ]+\.(?:jpe?g|png|webp|gif|pdf)/gi) || []))];
+    const imgs = urls.filter((u) => !/\.pdf$/i.test(u));
+    const id = (b.match(/\bid="(\d+)"/) || [])[1];
+    const year = Number((b.match(/year(?:Published|_published)?[^>]*?>?\s*"?(\d{4})/i) || [])[1]) || null;
+    if (!urls.length && !id) continue;
+    out.push({
+      id, year,
+      image: imgs.find((u) => /(large|full|original)/i.test(u)) || [...imgs].sort((a, b) => b.length - a.length)[0] || null,
+      thumb: imgs.find((u) => /(thumb|small|medium)/i.test(u)) || imgs[0] || null,
+      pdf: urls.find((u) => /\.pdf$/i.test(u)) || null,
+      page: id ? `https://skimap.org/SkiMaps/view/${id}` : null,
+    });
+  }
+  return out.filter((m) => m.image || m.thumb).sort((a, b) => (b.year || 0) - (a.year || 0));
+}
+
 /** Pull map images out of a Skimap.org ski-area record, whatever its exact shape. */
 export function extractMaps(record) {
   const maps = [];
@@ -96,13 +118,16 @@ export default async function handler(req, res) {
     if (!area) log.push('no OpenSkiMap ski area near this point');
   } catch (e) { log.push(`openskimap: ${e.message}`); }
   if (area?.skimapId) {
-    for (const url of [`https://skimap.org/SkiAreas/view/${area.skimapId}.json`, `https://skimap.org/SkiAreas/view/${area.skimapId}`]) {
+    const id = area.skimapId;
+    for (const url of [`https://skimap.org/SkiAreas/view/${id}.xml`, `https://skimap.org/SkiAreas/view/${id}.json`, `https://skimap.org/SkiAreas/view/${id}`]) {
       try {
         const body = await get(url, { json: false });
+        if (req.query.debug) log.push(`${url} ok ${body.length}b: ${body.slice(0, 300).replace(/\s+/g, ' ')}`);
+        if (/\.xml$/.test(url)) { maps = mapsFromXml(body).slice(0, 8); if (maps.length) break; continue; }
         let rec; try { rec = JSON.parse(body); } catch { rec = null; }
         if (rec) { maps = extractMaps(rec).slice(0, 8); if (req.query.debug) log.push(`keys: ${Object.keys(rec).join(',')}; sample: ${JSON.stringify(rec.ski_maps?.[0] || rec).slice(0, 400)}`); }
         else { // HTML page: scrape image links as a last resort
-          const imgs = [...new Set((body.match(/https?:\/\/[^"' ]+\.(?:jpe?g|png)/gi) || []).filter((u) => /skimap/i.test(u)))];
+          const imgs = [...new Set((body.match(/(?:https?:)?\/\/[^"' )]+\.(?:jpe?g|png|webp)/gi) || []).map((u) => (u.startsWith('//') ? `https:${u}` : u)).filter((u) => /skimap/i.test(u)))];
           maps = imgs.slice(0, 6).map((u) => ({ image: u, thumb: u, year: null, page: `https://skimap.org/SkiAreas/view/${area.skimapId}` }));
         }
         if (maps.length) break;

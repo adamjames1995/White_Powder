@@ -2,7 +2,6 @@
 // Secondary: Overpass, which also gives the ski-area outline, when its public servers aren't overloaded.
 import { foodQuery, fetchOverpass, buildFood, NOMINATIM_KINDS, nominatimUrl, nominatimToElements, OVERPASS } from '../lib/food.js';
 
-export const config = { maxDuration: 60 };
 const UA = 'WhitePowder/1.0 (personal ski forecast app; https://github.com/adamjames1995/White_Powder)';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -42,7 +41,7 @@ export default async function handler(req, res) {
     // Run both; Overpass gets a short leash so a busy server doesn't hold things up.
     const [nom, ovp] = await Promise.all([
       nominatim(lat, lon, log),
-      fetchOverpass(foodQuery(lat, lon), { timeoutMs: 12000, headers: { 'user-agent': UA } }).catch((e) => { log.push(`overpass: ${e.message}`); return []; }),
+      fetchOverpass(foodQuery(lat, lon), { timeoutMs: 8000, headers: { 'user-agent': UA } }).catch((e) => { log.push(`overpass: ${e.message}`); return []; }),
     ]);
     const els = [...ovp, ...nom];
     if (!els.some((e) => e.tags?.amenity)) throw new Error(log.join('; ') || 'no places found');

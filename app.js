@@ -1,4 +1,4 @@
-import { RESORTS, byId } from '/lib/resorts.js';
+import { RESORTS, byId, logoUrl } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS } from '/lib/snow.js';
 
 const app = document.getElementById('app');
@@ -96,7 +96,7 @@ function renderHome() {
     return `
       <a class="card rc" href="#/resort/${r.id}">
         <div class="rc-head">
-          <div class="badge" aria-hidden="true">${esc(initials)}</div>
+          <div class="badge" aria-hidden="true">${esc(initials)}<img src="${logoUrl(r)}" alt="" loading="lazy" onerror="this.remove()"/></div>
           <div class="rc-title">
             <h2>${esc(r.name)}</h2>
             <div class="sub">${r.summitFt.toLocaleString()} ft · ${esc(r.state)} · ${esc(r.country)}</div>

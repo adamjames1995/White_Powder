@@ -85,46 +85,73 @@ function renderHome() {
     return;
   }
   const prefs = getPrefs();
+  // One shared scale across resorts so bar heights compare honestly.
+  const scaleMax = Math.max(12, ...RESORTS.flatMap((r) => (state.data[r.id]?.summit.days || []).slice(0, 15).map((d) => d.snow)));
   const cards = RESORTS.map((r) => {
     const d = state.data[r.id];
     if (!d) return '';
-    const s = d.summit, b = d.base;
-    const next5 = sumDays(s.days, 0, 5);
-    const total = sumDays(s.days, 0, 16);
+    const s = d.summit;
     const pd = prefs.resorts.includes(r.id) ? powderDay(s.days, prefs) : null;
+    const initials = r.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2);
     return `
-      <a class="card" href="#/resort/${r.id}">
-        <div class="row">
-          <div>
+      <a class="card rc" href="#/resort/${r.id}">
+        <div class="rc-head">
+          <div class="badge" aria-hidden="true">${esc(initials)}</div>
+          <div class="rc-title">
             <h2>${esc(r.name)}</h2>
-            <div class="sub">${esc(r.region)}</div>
+            <div class="sub">${r.summitFt.toLocaleString()} ft · ${esc(r.state)} · ${esc(r.country)}</div>
           </div>
-          <div class="hero"><div class="num">${inch(next5)}</div><div class="lbl">Next 5 days · summit</div></div>
+          ${pd ? `<span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}
         </div>
-        ${sparkline(s.days)}
-        <div class="chips">
-          ${pd ? `<span class="chip alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}
-          <span class="chip">16-day ${inch(total)}</span>
-          <span class="chip">Summit ${deg(s.current?.tempF)}F · Base ${deg(b.current?.tempF)}F</span>
-          <span class="chip">Snow level ${ft(s.current?.snowLevelFt)}</span>
+        <div class="rc-body">
+          <div class="l24" id="l24-${r.id}">${last24Box(r, s)}</div>
+          <div class="rc-chart">${snowStrip(s.days.slice(0, 15), scaleMax)}</div>
         </div>
       </a>`;
   }).join('');
   app.innerHTML = `
-    <div class="updated">Updated ${ago(state.fetchedAt)}${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
-    ${cards}`;
+    <div class="updated">Updated ${ago(state.fetchedAt)} · summit forecasts${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
+    ${cards}
+    <div class="key"><span><i style="background:var(--snow)"></i>Snow</span><span><i style="background:var(--mixed)"></i>Rain/snow mix</span></div>`;
+  RESORTS.forEach((r) => loadObs(r, state.data[r.id].summit, `l24-${r.id}`));
 }
 
-function sparkline(days) {
-  const n = days.length || 1;
-  const max = Math.max(4, ...days.map((d) => d.snow));
-  const w = 100 / n;
-  const bars = days.map((d, i) => {
-    const h = d.snow > 0.05 ? Math.max(1.5, (d.snow / max) * 30) : 0;
-    return h ? `<rect x="${(i * w + w * 0.15).toFixed(2)}" y="${(32 - h).toFixed(2)}" width="${(w * 0.7).toFixed(2)}" height="${h.toFixed(2)}" rx="0.8" fill="var(--summit)"/>` : '';
+function obsTime(iso) {
+  // SNOTEL times are local station time, e.g. "2026-11-22 07:00"
+  const d = new Date(iso.replace(' ', 'T'));
+  if (isNaN(d)) return '';
+  const h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
+  return `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()} ${h % 12 || 12}:${m}${h < 12 ? 'a' : 'p'}`;
+}
+
+function last24Box(r, s) {
+  const obs = snotelCache.get(r.id);
+  const reported = obs && !obs.error && obs.new24In != null;
+  const val = reported ? obs.new24In : s.current?.modeled24In;
+  const when = reported ? obsTime(obs.time) : 'Model';
+  return `
+    <div class="l24-k">Last 24 Hours</div>
+    <div class="l24-v">${inch(val)}</div>
+    <div class="l24-t">${esc(when)}</div>
+    <div class="l24-s ${reported ? 'rep' : 'est'}">${reported ? 'Reported ✓' : r.snotel && !obs ? 'Loading…' : 'Estimated ⓘ'}</div>`;
+}
+
+function snowStrip(days, scaleMax) {
+  const COL = 34, H = 64;
+  const groups = [0, 5, 10].filter((g) => g < days.length).map((g) => {
+    const n = Math.min(5, days.length - g);
+    return `<div class="grp" style="width:${n * COL}px"><div class="grp-k">${g === 0 ? 'Next 1-5 Days' : `Next ${g + 1}-${g + n} Days`}</div>
+      <div class="grp-line"><span>${inch(sumDays(days, g, 5))}</span></div></div>`;
   }).join('');
-  return `<svg class="spark" viewBox="0 0 100 34" preserveAspectRatio="none" role="img" aria-label="16-day summit snowfall">
-    <line x1="0" x2="100" y1="32.5" y2="32.5" stroke="var(--grid)" stroke-width="0.6"/>${bars}</svg>`;
+  const cols = days.map((d) => {
+    const h = d.snow >= 0.1 ? Math.max(4, Math.round((d.snow / scaleMax) * H)) : 0;
+    const weekend = [0, 6].includes(dayDate(d.date).getDay());
+    const bar = h
+      ? `<div class="bar ${d.mixed ? 'mixed' : ''}" style="height:${h}px" title="${dow(d.date)} ${inch(d.snow)}"></div>`
+      : `<div class="bar zero"></div>`;
+    return `<div class="col ${weekend ? 'wk' : ''}"><div class="bars">${bar}</div><div class="dl">${dow(d.date)[0]}</div><div class="dn">${dom(d.date)}</div></div>`;
+  }).join('');
+  return `<div class="strip" style="width:${days.length * COL}px"><div class="grps">${groups}</div><div class="cols">${cols}</div></div>`;
 }
 
 function renderResort(r) {
@@ -196,11 +223,20 @@ function obsTile(r, obs, s) {
     <div class="s">72 h ${inch(obs.new72In)} · depth ${obs.depthIn ?? '–'}" · ${esc(r.snotel.name)}</div>`;
 }
 
-async function loadObs(r, s) {
-  if (!r.snotel || snotelCache.has(r.id)) return;
-  try {
-    snotelCache.set(r.id, await getJSON(`/api/snotel?triplet=${encodeURIComponent(r.snotel.triplet)}`));
-  } catch { snotelCache.set(r.id, { error: true }); }
+const obsPending = new Map();
+async function loadObs(r, s, homeEl) {
+  if (r.snotel && !snotelCache.has(r.id)) {
+    if (!obsPending.has(r.id)) {
+      obsPending.set(r.id, getJSON(`/api/snotel?triplet=${encodeURIComponent(r.snotel.triplet)}`)
+        .then((j) => snotelCache.set(r.id, j)).catch(() => snotelCache.set(r.id, { error: true })));
+    }
+    await obsPending.get(r.id);
+  }
+  if (homeEl) {
+    const el = document.getElementById(homeEl);
+    if (el) el.innerHTML = last24Box(r, s);
+    return;
+  }
   const el = document.getElementById('obs-tile');
   if (el && location.hash === `#/resort/${r.id}`) el.innerHTML = obsTile(r, snotelCache.get(r.id), s);
 }

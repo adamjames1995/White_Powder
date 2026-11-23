@@ -34,14 +34,33 @@ export function parseSnotelCsv(csv) {
   };
 }
 
+/** Daily CSV (start-of-day values): new snow for day D = depth(D+1) − depth(D), floored at 0. */
+export function parseSnotelDailyCsv(csv) {
+  const rows = csv.split('\n').filter((l) => l.trim() && !l.startsWith('#')).slice(1)
+    .map((l) => {
+      const [date, snwd] = l.split(',');
+      const v = snwd === undefined || snwd.trim() === '' ? null : Number(snwd);
+      return { date: date.trim().slice(0, 10), depth: Number.isFinite(v) ? v : null };
+    })
+    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date));
+  const out = [];
+  for (let i = 0; i < rows.length - 1; i++) {
+    const a = rows[i].depth, b = rows[i + 1].depth;
+    out.push({ date: rows[i].date, newIn: a == null || b == null ? null : Math.max(0, b - a) });
+  }
+  return out;
+}
+
 export default async function handler(req, res) {
   const triplet = String(req.query.triplet || '');
   if (!/^\d+:[A-Z]{2}:SNTL$/i.test(triplet)) return res.status(400).json({ error: 'bad triplet' });
   const url = `https://wcc.sc.egov.usda.gov/reportGenerator/view_csv/customSingleStationReport/hourly/${triplet}%7Cid=%22%22%7Cname/-72,0/SNWD::value,WTEQ::value,TOBS::value`;
   try {
-    const r = await fetch(url);
+    const dailyUrl = `https://wcc.sc.egov.usda.gov/reportGenerator/view_csv/customSingleStationReport/daily/${triplet}%7Cid=%22%22%7Cname/-14,0/SNWD::value`;
+    const [r, rd] = await Promise.all([fetch(url), fetch(dailyUrl).catch(() => null)]);
     if (!r.ok) throw new Error(`NRCS ${r.status}`);
     const out = parseSnotelCsv(await r.text());
+    out.daily = rd && rd.ok ? parseSnotelDailyCsv(await rd.text()) : [];
     res.setHeader('Cache-Control', 's-maxage=1800, stale-while-revalidate=3600');
     res.status(200).json({ triplet, ...out });
   } catch (e) {

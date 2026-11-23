@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { snowFraction, slr, hourlySnowIn, processPoint, forecastUrl, resortPoints, MODELS } from '../lib/snow.js';
 import { RESORTS } from '../lib/resorts.js';
-import { parseSnotelCsv } from '../api/snotel.js';
+import { parseSnotelCsv, parseSnotelDailyCsv } from '../api/snotel.js';
 
 test('rain/snow split', () => {
   assert.equal(snowFraction(-5), 1);
@@ -79,4 +79,18 @@ test('SNOTEL CSV parsing estimates new snow from depth rise', () => {
   assert.equal(o.depthIn, 42);
   assert.ok(o.new24In >= 11 && o.new24In <= 12.5, `got ${o.new24In}`);
   assert.ok(o.new72In >= o.new24In);
+});
+
+test('SNOTEL daily CSV gives per-day new snow from depth change', () => {
+  const csv = ['#x', 'Date,Snow Depth (in) Start of Day Values', '2026-11-18,30', '2026-11-19,36', '2026-11-20,34', '2026-11-21,', '2026-11-22,40'].join('\n');
+  const d = parseSnotelDailyCsv(csv);
+  assert.deepEqual(d.map((x) => x.newIn), [6, 0, null, null]);
+  assert.equal(d[0].date, '2026-11-18');
+});
+
+test('processPoint splits past days into history', () => {
+  const nowMs = Date.UTC(2026, 10, 24, 20); // Nov 24 noon PST; fake data starts Nov 22
+  const out = processPoint(fakeLoc({}), 8000, nowMs);
+  assert.deepEqual(out.history.map((d) => d.date), ['2026-11-22', '2026-11-23']);
+  assert.equal(out.days[0].date, '2026-11-24');
 });

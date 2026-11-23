@@ -1,4 +1,4 @@
-const CACHE = 'snowline-shell-v3';
+const CACHE = 'snowline-shell-v4';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/lib/snow.js', '/lib/resorts.js', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {

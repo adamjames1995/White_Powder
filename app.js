@@ -3,7 +3,7 @@ import { loadResorts, sumDays, MODELS } from '/lib/snow.js';
 
 const app = document.getElementById('app');
 const refreshBtn = document.getElementById('refresh');
-const CACHE_KEY = 'snowline:forecast:v1';
+const CACHE_KEY = 'snowline:forecast:v2';
 const PREFS_KEY = 'snowline:prefs:v1';
 const FRESH_MS = 30 * 60 * 1000;
 
@@ -72,53 +72,91 @@ async function getJSON(url) {
 // ---------- views ----------
 function render() {
   const [, view, id] = (location.hash || '#/').split('/');
+  document.body.classList.toggle('detail', view === 'resort');
   if (view === 'resort' && byId(id)) return renderResort(byId(id));
   if (view === 'settings') return renderSettings();
   renderHome();
 }
 
+// Shared bar scale across all resorts (history + 15-day forecast) so heights compare honestly.
+function sharedScale() {
+  return Math.max(12, ...RESORTS.flatMap((r) => {
+    const s = state.data?.[r.id]?.summit;
+    return s ? [...historyDays(r, s).map((d) => d.snow), ...s.days.slice(0, 15).map((d) => d.snow)] : [];
+  }));
+}
+
+/** Past days: SNOTEL-reported daily new snow when available, otherwise modeled. */
+function historyDays(r, s) {
+  const obs = snotelCache.get(r.id);
+  const rep = new Map((obs && !obs.error && obs.daily ? obs.daily : []).map((d) => [d.date, d.newIn]));
+  return (s.history || []).slice(-7).map((d) => {
+    const v = rep.get(d.date);
+    return v != null ? { date: d.date, snow: v, src: 'rep' } : { date: d.date, snow: d.snow, mixed: d.mixed, src: 'est' };
+  });
+}
+
 function renderHome() {
   if (!state.data) {
     app.innerHTML = state.error
-      ? `<p class="pad err">Couldn't load the forecast (${esc(state.error)}). Pull to refresh or tap ↻.</p>`
+      ? `<p class="pad err">Couldn't load the forecast (${esc(state.error)}). Tap ↻ to retry.</p>`
       : `<p class="pad muted">Loading forecast…</p>`;
     return;
   }
   const prefs = getPrefs();
-  // One shared scale across resorts so bar heights compare honestly.
-  const scaleMax = Math.max(12, ...RESORTS.flatMap((r) => (state.data[r.id]?.summit.days || []).slice(0, 15).map((d) => d.snow)));
   const cards = RESORTS.map((r) => {
-    const d = state.data[r.id];
-    if (!d) return '';
-    const s = d.summit;
+    const s = state.data[r.id]?.summit;
+    if (!s) return '';
     const pd = prefs.resorts.includes(r.id) ? powderDay(s.days, prefs) : null;
-    const initials = r.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2);
     return `
       <a class="card rc" href="#/resort/${r.id}">
         <div class="rc-head">
-          <div class="badge" aria-hidden="true">${esc(initials)}<img src="${logoUrl(r)}" alt="" loading="lazy" onerror="this.remove()"/></div>
+          ${badge(r)}
           <div class="rc-title">
             <h2>${esc(r.name)}</h2>
             <div class="sub">${r.summitFt.toLocaleString()} ft · ${esc(r.state)} · ${esc(r.country)}</div>
           </div>
           ${pd ? `<span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}
         </div>
-        <div class="rc-body">
-          <div class="l24" id="l24-${r.id}">${last24Box(r, s)}</div>
-          <div class="rc-chart">${snowStrip(s.days.slice(0, 15), scaleMax)}</div>
-        </div>
+        <div class="scroller" data-strip="${r.id}"></div>
       </a>`;
   }).join('');
   app.innerHTML = `
-    <div class="updated">Updated ${ago(state.fetchedAt)} · summit forecasts${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
+    <div class="updated">Updated ${ago(state.fetchedAt)} · summit forecasts · swipe left for history${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
     ${cards}
-    <div class="key"><span><i style="background:var(--snow)"></i>Snow</span><span><i style="background:var(--mixed)"></i>Rain/snow mix</span></div>`;
-  RESORTS.forEach((r) => loadObs(r, state.data[r.id].summit, `l24-${r.id}`));
+    ${legendKey()}`;
+  mountStrips(false);
+  RESORTS.forEach((r) => loadObs(r).then(() => mountStrips(false, r.id)));
+}
+
+function legendKey() {
+  return `<div class="key"><span><i style="background:var(--hist)"></i>Reported</span><span><i style="background:var(--snow)"></i>Snow</span><span><i style="background:var(--mixed)"></i>Rain/snow mix</span></div>`;
+}
+
+function badge(r, cls = '') {
+  const initials = r.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2);
+  return `<div class="badge ${cls}" aria-hidden="true">${esc(initials)}<img src="${logoUrl(r)}" alt="" loading="lazy" onerror="this.remove()"/></div>`;
+}
+
+/** (Re)render every strip container on the page, keeping scroll position after the first mount. */
+function mountStrips(labels, onlyId) {
+  const scale = sharedScale();
+  document.querySelectorAll('[data-strip]').forEach((el) => {
+    const r = byId(el.dataset.strip);
+    if (!r || (onlyId && r.id !== onlyId)) return;
+    const s = state.data[r.id].summit;
+    const first = !el.dataset.mounted;
+    const prev = el.scrollLeft;
+    el.innerHTML = snowStrip(historyDays(r, s), s.days.slice(0, 15), last24Box(r, s), scale, labels || el.dataset.labels === '1');
+    const histW = el.querySelector('.seg.hist')?.offsetWidth || 0;
+    el.scrollLeft = first ? Math.max(0, histW - 18) : prev; // peek a sliver of history
+    el.dataset.mounted = '1';
+  });
 }
 
 function obsTime(iso) {
   // SNOTEL times are local station time, e.g. "2026-11-22 07:00"
-  const d = new Date(iso.replace(' ', 'T'));
+  const d = new Date(String(iso).replace(' ', 'T'));
   if (isNaN(d)) return '';
   const h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0');
   return `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()} ${h % 12 || 12}:${m}${h < 12 ? 'a' : 'p'}`;
@@ -128,80 +166,132 @@ function last24Box(r, s) {
   const obs = snotelCache.get(r.id);
   const reported = obs && !obs.error && obs.new24In != null;
   const val = reported ? obs.new24In : s.current?.modeled24In;
-  const when = reported ? obsTime(obs.time) : 'Model';
-  return `
+  return `<div class="l24">
     <div class="l24-k">Last 24 Hours</div>
     <div class="l24-v">${inch(val)}</div>
-    <div class="l24-t">${esc(when)}</div>
-    <div class="l24-s ${reported ? 'rep' : 'est'}">${reported ? 'Reported ✓' : r.snotel && !obs ? 'Loading…' : 'Estimated ⓘ'}</div>`;
+    <div class="l24-t">${esc(reported ? obsTime(obs.time) : 'Model')}</div>
+    <div class="l24-s ${reported ? 'rep' : 'est'}">${reported ? 'Reported ✓' : r.snotel && !obs ? 'Loading…' : 'Estimated ⓘ'}</div>
+  </div>`;
 }
 
-function snowStrip(days, scaleMax) {
-  const COL = 34, H = 64;
-  const groups = [0, 5, 10].filter((g) => g < days.length).map((g) => {
-    const n = Math.min(5, days.length - g);
-    return `<div class="grp" style="width:${n * COL}px"><div class="grp-k">${g === 0 ? 'Next 1-5 Days' : `Next ${g + 1}-${g + n} Days`}</div>
-      <div class="grp-line"><span>${inch(sumDays(days, g, 5))}</span></div></div>`;
-  }).join('');
-  const cols = days.map((d) => {
-    const h = d.snow >= 0.1 ? Math.max(4, Math.round((d.snow / scaleMax) * H)) : 0;
+const COL = 34, BAR_H = 64;
+function stripCols(days, scaleMax, labels, hist) {
+  return days.map((d) => {
+    const h = d.snow >= 0.1 ? Math.max(4, Math.round((d.snow / scaleMax) * BAR_H)) : 0;
     const weekend = [0, 6].includes(dayDate(d.date).getDay());
-    const bar = h
-      ? `<div class="bar ${d.mixed ? 'mixed' : ''}" style="height:${h}px" title="${dow(d.date)} ${inch(d.snow)}"></div>`
-      : `<div class="bar zero"></div>`;
-    return `<div class="col ${weekend ? 'wk' : ''}"><div class="bars">${bar}</div><div class="dl">${dow(d.date)[0]}</div><div class="dn">${dom(d.date)}</div></div>`;
+    const cls = hist && d.src === 'rep' ? 'hist' : d.mixed ? 'mixed' : '';
+    const tip = `${dow(d.date)} ${dom(d.date)}: ${inch(d.snow)}${hist ? (d.src === 'rep' ? ' reported' : ' estimated') : ''}`;
+    const lbl = labels ? `<div class="vl">${d.snow < 0.5 ? '0' : Math.round(d.snow)}</div>` : '';
+    const bar = h ? `<div class="bar ${cls}" style="height:${h}px"></div>` : `<div class="bar zero ${cls}"></div>`;
+    return `<div class="col ${weekend ? 'wk' : ''}" title="${tip}"><div class="bars">${lbl}${bar}</div><div class="dl">${dow(d.date)[0]}</div><div class="dn">${dom(d.date)}</div></div>`;
   }).join('');
-  return `<div class="strip" style="width:${days.length * COL}px"><div class="grps">${groups}</div><div class="cols">${cols}</div></div>`;
+}
+
+function snowStrip(history, days, l24, scaleMax, labels) {
+  const grp = (label, total, n) => `<div class="grp" style="width:${n * COL}px"><div class="grp-k">${label}</div><div class="grp-line"><span>${inch(total)}</span></div></div>`;
+  const histTotal = history.reduce((a, d) => a + (d.snow || 0), 0);
+  const fcGroups = [0, 5, 10].filter((g) => g < days.length).map((g) => {
+    const n = Math.min(5, days.length - g);
+    return grp(`Next ${g + 1}-${g + n} Days`, sumDays(days, g, 5), n);
+  }).join('');
+  return `<div class="strip ${labels ? 'labels' : ''}">
+    ${history.length ? `<div class="seg hist"><div class="grps">${grp(`Past ${history.length} Days`, histTotal, history.length).replace('class="grp-line"', 'class="grp-line h"')}</div><div class="cols">${stripCols(history, scaleMax, labels, true)}</div></div>` : ''}
+    ${l24}
+    <div class="seg fc"><div class="grps">${fcGroups}</div><div class="cols">${stripCols(days, scaleMax, labels, false)}</div></div>
+  </div>`;
 }
 
 function renderResort(r) {
   const d = state.data?.[r.id];
   if (!d) { renderHome(); return; }
   const s = d.summit, b = d.base;
-  const obs = snotelCache.get(r.id);
   const models = s.modelsAvailable.map((k) => MODELS.find((m) => m.key === k)?.label).join(' · ');
 
   app.innerHTML = `
-    <a class="back" href="#/">‹ All resorts</a>
-    <h1 class="title">${esc(r.name)}</h1>
-    <div class="updated">${esc(r.region)} · base ${r.baseFt.toLocaleString()}' · summit ${r.summitFt.toLocaleString()}' · updated ${ago(state.fetchedAt)}</div>
+    <div class="dhead">
+      <a class="circ" href="#/" aria-label="Back">‹</a>
+      <div class="pillbar">
+        <a href="#/settings" aria-label="Powder alerts">🔔</a>
+        <button id="share" aria-label="Share">⤴</button>
+      </div>
+    </div>
+    <div class="dtitle">
+      <div class="dtitle-row">${badge(r, 'sm')}<h1>${esc(r.name)}</h1></div>
+      <div class="fp">Forecast Point <b>${r.summitFt.toLocaleString()} ft</b> <span class="muted">· base ${r.baseFt.toLocaleString()} ft · ${esc(r.region)}</span></div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <a href="#sec-summary" class="on">Snow Summary</a>
+      <a href="#sec-weather">Weather</a>
+      <a href="#sec-report">Snow Report</a>
+      <a href="#sec-cams">Cams</a>
+    </nav>
 
-    <section class="section">
-      <h3>Right now</h3>
-      <div class="tiles">
-        <div class="tile"><div class="k">Summit</div><div class="v">${deg(s.current?.tempF)}F</div><div class="s">Base ${deg(b.current?.tempF)}F</div></div>
-        <div class="tile"><div class="k">Summit wind</div><div class="v">${mph(s.current?.windMph)} <span class="small">mph</span></div><div class="s">Gusts ${mph(s.current?.gustMph)} mph</div></div>
-        <div class="tile"><div class="k">Snow level</div><div class="v">${ft(s.current?.snowLevelFt)}</div><div class="s">${snowLevelNote(s.current?.snowLevelFt, r)}</div></div>
-        <div class="tile"><div class="k">Next 24 h · summit</div><div class="v">${inch(s.current?.next24In)}</div><div class="s">Base ${inch(b.current?.next24In)}</div></div>
-        <div class="tile" id="obs-tile">${obsTile(r, obs, s)}</div>
+    <section id="sec-summary" class="dsec">
+      <div class="dsec-h"><h2>Snow Summary</h2><span class="muted small">Updated ${ago(state.fetchedAt)}</span></div>
+      <div class="card flat">
+        <div class="scroller" data-strip="${r.id}" data-labels="1"></div>
+        <details class="more" id="more-chart">
+          <summary>Base vs summit · model range</summary>
+          <div class="legend">
+            <span><i style="background:var(--summit)"></i>Summit ${r.summitFt.toLocaleString()}'</span>
+            <span><i style="background:var(--base)"></i>Base ${r.baseFt.toLocaleString()}'</span>
+            <span><svg width="10" height="10" style="vertical-align:-1px;margin-right:5px"><line x1="5" x2="5" y1="0" y2="10" stroke="var(--text-secondary)" stroke-width="1.5"/></svg>Model range</span>
+          </div>
+          <div class="chart-wrap" id="chart"></div>
+          <p class="small muted">Blend of ${esc(models)}. Tap a day for details.</p>
+        </details>
+      </div>
+      ${legendKey()}
+    </section>
+
+    <section id="sec-cams" class="dsec">
+      <div class="dsec-h"><h2>Cams</h2><a href="${esc(r.camsUrl)}" target="_blank" rel="noopener">Official cams ↗</a></div>
+      <div class="card flat"><div class="camrow" id="cams"><p class="small muted">Loading cams…</p></div></div>
+    </section>
+
+    <section id="sec-weather" class="dsec">
+      <div class="dsec-h"><h2>Weather</h2></div>
+      <div class="card flat">
+        <div class="tiles">
+          <div class="tile"><div class="k">Summit</div><div class="v">${deg(s.current?.tempF)}F</div><div class="s">Base ${deg(b.current?.tempF)}F</div></div>
+          <div class="tile"><div class="k">Summit wind</div><div class="v">${mph(s.current?.windMph)} <span class="small">mph</span></div><div class="s">Gusts ${mph(s.current?.gustMph)} mph</div></div>
+          <div class="tile"><div class="k">Snow level</div><div class="v">${ft(s.current?.snowLevelFt)}</div><div class="s">${snowLevelNote(s.current?.snowLevelFt, r)}</div></div>
+          <div class="tile"><div class="k">Next 24 h · summit</div><div class="v">${inch(s.current?.next24In)}</div><div class="s">Base ${inch(b.current?.next24In)}</div></div>
+        </div>
+        <div class="table-scroll" style="margin-top:12px">${dayTable(s.days, b.days)}</div>
       </div>
     </section>
 
-    <section class="section">
-      <h3>16-day snowfall</h3>
-      <div class="legend">
-        <span><i style="background:var(--summit)"></i>Summit ${r.summitFt.toLocaleString()}'</span>
-        <span><i style="background:var(--base)"></i>Base ${r.baseFt.toLocaleString()}'</span>
-        <span><svg width="10" height="10" style="vertical-align:-1px;margin-right:5px"><line x1="5" x2="5" y1="0" y2="10" stroke="var(--text-secondary)" stroke-width="1.5"/></svg>Model range (summit)</span>
-      </div>
-      <div class="chart-wrap" id="chart"></div>
-      <p class="small muted">Blend of ${esc(models)}. Tap a day for details.</p>
-    </section>
-
-    <section class="section">
-      <h3>Day by day</h3>
-      <div class="table-scroll">${dayTable(s.days, b.days)}</div>
-    </section>
-
-    <section class="section">
-      <h3>Webcams</h3>
-      <div id="cams"><p class="small muted">Loading cams…</p></div>
-      <p style="margin-top:10px"><a class="btn" href="${esc(r.camsUrl)}" target="_blank" rel="noopener">Official ${esc(r.name)} cams ↗</a></p>
+    <section id="sec-report" class="dsec">
+      <div class="dsec-h"><h2>Snow Report</h2></div>
+      <div class="card flat" id="report">${reportHtml(r, s)}</div>
     </section>`;
 
-  drawChart(document.getElementById('chart'), s.days, b.days);
-  loadObs(r, s);
+  mountStrips(true);
+  loadObs(r).then(() => {
+    if (location.hash !== `#/resort/${r.id}`) return;
+    mountStrips(true);
+    const rep = document.getElementById('report');
+    if (rep) rep.innerHTML = reportHtml(r, s);
+  });
   loadCams(r);
+
+  const more = document.getElementById('more-chart');
+  more.addEventListener('toggle', () => { if (more.open) drawChart(document.getElementById('chart'), s.days, b.days); });
+
+  document.getElementById('share').addEventListener('click', async () => {
+    const text = `${r.name}: ${inch(sumDays(s.days, 0, 5))} next 5 days (summit)`;
+    try { if (navigator.share) await navigator.share({ title: 'Snowline', text, url: location.href }); else await navigator.clipboard.writeText(`${text} ${location.href}`); } catch {}
+  });
+
+  const tabs = [...document.querySelectorAll('#tabs a')];
+  tabs.forEach((a) => a.addEventListener('click', (e) => {
+    e.preventDefault();
+    tabs.forEach((t) => t.classList.toggle('on', t === a));
+    const sec = document.querySelector(a.getAttribute('href'));
+    const y = sec.getBoundingClientRect().top + window.scrollY - document.getElementById('tabs').offsetHeight - 8;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+  }));
 }
 
 function snowLevelNote(level, r) {
@@ -211,34 +301,32 @@ function snowLevelNote(level, r) {
   return 'Rain at base';
 }
 
-function obsTile(r, obs, s) {
-  if (!r.snotel) {
-    return `<div class="k">Last 24 h · modeled</div><div class="v">${inch(s.current?.modeled24In)}</div><div class="s">72 h ${inch(s.current?.modeled72In)} · no SNOTEL in BC</div>`;
+function reportHtml(r, s) {
+  const obs = snotelCache.get(r.id);
+  if (!r.snotel || !obs || obs.error) {
+    const why = !r.snotel ? 'No SNOTEL station in BC — showing model estimates.' : !obs ? 'Loading SNOTEL…' : 'SNOTEL unavailable right now — showing model estimates.';
+    return `<div class="tiles">
+      <div class="tile"><div class="k">Last 24 h · estimated</div><div class="v">${inch(s.current?.modeled24In)}</div></div>
+      <div class="tile"><div class="k">Last 72 h · estimated</div><div class="v">${inch(s.current?.modeled72In)}</div></div>
+    </div><p class="small muted" style="margin:10px 0 0">${why}</p>`;
   }
-  if (!obs) return `<div class="k">Last 24 h · observed</div><div class="v">…</div><div class="s">${esc(r.snotel.name)} SNOTEL</div>`;
-  if (obs.error) {
-    return `<div class="k">Last 24 h · modeled</div><div class="v">${inch(s.current?.modeled24In)}</div><div class="s">72 h ${inch(s.current?.modeled72In)} · SNOTEL unavailable</div>`;
-  }
-  return `<div class="k">Last 24 h · observed</div><div class="v">${inch(obs.new24In)}</div>
-    <div class="s">72 h ${inch(obs.new72In)} · depth ${obs.depthIn ?? '–'}" · ${esc(r.snotel.name)}</div>`;
+  return `<div class="tiles">
+      <div class="tile"><div class="k">Last 24 h</div><div class="v">${inch(obs.new24In)}</div></div>
+      <div class="tile"><div class="k">Last 72 h</div><div class="v">${inch(obs.new72In)}</div></div>
+      <div class="tile"><div class="k">Snow depth</div><div class="v">${obs.depthIn ?? '–'}"</div></div>
+      <div class="tile"><div class="k">Snow water equiv.</div><div class="v">${obs.sweIn != null ? `${obs.sweIn.toFixed(1)}"` : '–'}</div></div>
+    </div>
+    <p class="small muted" style="margin:10px 0 0">${esc(r.snotel.name)} SNOTEL · ${esc(obsTime(obs.time))}. New snow is estimated from the rise in snow depth, so it runs a little low as snow settles.</p>`;
 }
 
 const obsPending = new Map();
-async function loadObs(r, s, homeEl) {
-  if (r.snotel && !snotelCache.has(r.id)) {
-    if (!obsPending.has(r.id)) {
-      obsPending.set(r.id, getJSON(`/api/snotel?triplet=${encodeURIComponent(r.snotel.triplet)}`)
-        .then((j) => snotelCache.set(r.id, j)).catch(() => snotelCache.set(r.id, { error: true })));
-    }
-    await obsPending.get(r.id);
+function loadObs(r) {
+  if (!r.snotel || snotelCache.has(r.id)) return Promise.resolve();
+  if (!obsPending.has(r.id)) {
+    obsPending.set(r.id, getJSON(`/api/snotel?triplet=${encodeURIComponent(r.snotel.triplet)}`)
+      .then((j) => snotelCache.set(r.id, j)).catch(() => snotelCache.set(r.id, { error: true })));
   }
-  if (homeEl) {
-    const el = document.getElementById(homeEl);
-    if (el) el.innerHTML = last24Box(r, s);
-    return;
-  }
-  const el = document.getElementById('obs-tile');
-  if (el && location.hash === `#/resort/${r.id}`) el.innerHTML = obsTile(r, snotelCache.get(r.id), s);
+  return obsPending.get(r.id);
 }
 
 async function loadCams(r) {
@@ -250,16 +338,13 @@ async function loadCams(r) {
     camsCache.set(r.id, cams);
   }
   if (!el() || location.hash !== `#/resort/${r.id}`) return;
-  if (!cams.list.length) {
-    el().innerHTML = `<p class="small muted">${cams.error ? 'Webcam feed not configured yet — use the official link below.' : 'No nearby cams found.'}</p>`;
-    return;
-  }
-  el().innerHTML = `<div class="cams">${cams.list.map((c) => `
+  const official = `<a class="cam official" href="${esc(r.camsUrl)}" target="_blank" rel="noopener"><div class="ph">📷</div><span>All ${esc(r.name)} cams ↗</span></a>`;
+  el().innerHTML = cams.list.map((c) => `
     <a class="cam" href="${esc(c.link)}" target="_blank" rel="noopener">
       <img src="${esc(c.image)}" alt="${esc(c.title)}" loading="lazy" />
       <span>${esc(c.title)}</span>
-    </a>`).join('')}</div>
-    <p class="small muted" style="margin-top:6px">Webcams provided by <a href="https://www.windy.com/webcams" target="_blank" rel="noopener">windy.com</a></p>`;
+    </a>`).join('') + official;
+  if (cams.list.length) el().insertAdjacentHTML('afterend', `<p class="small muted" style="margin:6px 0 0">Webcam images via <a href="https://www.windy.com/webcams" target="_blank" rel="noopener">windy.com</a></p>`);
 }
 
 function dayTable(sd, bd) {

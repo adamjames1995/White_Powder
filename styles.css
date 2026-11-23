@@ -115,22 +115,31 @@ select { font: inherit; padding: 8px; border-radius: 8px; background: var(--surf
 .foot { max-width: 760px; margin: 0 auto; padding: 8px 16px 28px; font-size: 11px; color: var(--text-muted); line-height: 1.6; }
 .foot a { color: var(--text-secondary); }
 
-/* ---------- home resort cards (summary layout) ---------- */
-:root { --snow: #9085e9; --mixed: #d95926; --zero: #c3c2b7; }
-.card.rc { padding: 14px 0 12px 14px; }
-.rc-head { display: flex; align-items: center; gap: 12px; padding-right: 14px; }
+/* ---------- resort cards + snow strip ---------- */
+:root { --snow: #9085e9; --mixed: #d95926; --hist: #199e70; --zero: #c3c2b7; }
+.card.rc { padding: 14px 0 12px 0; }
+.rc-head { display: flex; align-items: center; gap: 12px; padding: 0 14px; }
 .badge {
-  flex: none; width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center;
+  position: relative; overflow: hidden; flex: none; width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center;
   background: var(--surface-2); border: 1px solid var(--border); font-weight: 700; font-size: 15px; color: var(--text-secondary);
 }
+.badge img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #fff; padding: 5px; }
+.badge.sm { width: 34px; height: 34px; border-radius: 8px; font-size: 12px; }
+.badge.sm img { padding: 3px; }
 .rc-title { min-width: 0; flex: 1; }
-.rc-title .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rc-title h2 { font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc-title .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pow { flex: none; font-size: 12px; font-weight: 600; color: var(--text-primary); border: 1px solid var(--snow); border-radius: 999px; padding: 4px 8px; }
-.rc-body { display: flex; gap: 0; margin-top: 12px; }
+
+.scroller { margin-top: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; overscroll-behavior-x: contain; }
+.scroller::-webkit-scrollbar { display: none; }
+.strip { display: flex; align-items: stretch; width: max-content; padding: 0 14px; }
+.seg { flex: none; }
 .l24 {
-  flex: none; width: 108px; background: var(--surface-0); border-radius: 10px; padding: 8px 6px 8px;
+  position: sticky; left: 0; z-index: 2; flex: none; width: 108px; margin: 0 4px;
+  background: var(--surface-0); border-radius: 10px; padding: 8px 6px;
   text-align: center; display: flex; flex-direction: column; justify-content: space-between;
+  box-shadow: 8px 0 10px -6px rgba(0,0,0,.6);
 }
 .l24-k { font-size: 12px; font-weight: 700; color: var(--text-primary); }
 .l24-v { font-size: 34px; font-weight: 800; line-height: 1.15; margin: 6px 0; background: var(--surface-1); border-radius: 8px; padding: 8px 0; font-variant-numeric: tabular-nums; }
@@ -138,26 +147,60 @@ select { font: inherit; padding: 8px; border-radius: 8px; background: var(--surf
 .l24-s { font-size: 12px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .l24-s.rep { color: var(--text-primary); }
 .l24-s.est { color: #eda100; }
-.rc-chart { flex: 1; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-left: 4px; }
-.rc-chart::-webkit-scrollbar { display: none; }
-.strip { padding-right: 14px; box-sizing: content-box; }
 .grps { display: flex; }
 .grp { flex: none; text-align: center; }
 .grp-k { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
 .grp-line { position: relative; height: 18px; margin: 2px 4px 0; border-right: 1px solid var(--text-muted); }
 .grp-line::before { content: ''; position: absolute; left: 0; right: 0; top: 9px; border-top: 1px solid var(--text-muted); }
-.grp-line span { position: relative; background: var(--surface-1); padding: 0 6px; font-size: 15px; font-weight: 700; color: var(--snow); line-height: 18px; font-variant-numeric: tabular-nums; }
+.grp-line span { position: relative; background: var(--surface-1); padding: 0 6px; font-size: 15px; font-weight: 700; color: var(--text-primary); line-height: 18px; font-variant-numeric: tabular-nums; }
 .cols { display: flex; }
 .col { flex: none; width: 34px; text-align: center; }
-.bars { height: 66px; display: flex; align-items: flex-end; justify-content: center; }
+.bars { height: 66px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+.strip.labels .bars { height: 84px; }
+.vl { font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px; font-variant-numeric: tabular-nums; }
 .bar { width: 26px; background: var(--snow); border-radius: 4px 4px 0 0; }
 .bar.mixed { background: var(--mixed); }
+.bar.hist { background: var(--hist); }
 .bar.zero { height: 3px; background: var(--zero); opacity: .55; border-radius: 2px; }
+.bar.zero.hist { background: var(--hist); opacity: .9; }
 .dl { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 .dn { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .col.wk .dl, .col.wk .dn { color: var(--text-primary); font-weight: 700; }
-.key { display: flex; gap: 14px; justify-content: center; font-size: 12px; color: var(--text-secondary); margin: 6px 0 4px; }
+.key { display: flex; gap: 14px; justify-content: center; font-size: 12px; color: var(--text-secondary); margin: 8px 0 4px; }
 .key i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 
-.badge { position: relative; overflow: hidden; }
-.badge img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #fff; padding: 5px; }
+/* ---------- resort detail ---------- */
+body.detail .topbar { display: none; }
+.dhead { display: flex; justify-content: space-between; align-items: center; padding: calc(env(safe-area-inset-top) + 4px) 2px 4px; }
+.circ, .pillbar { background: var(--surface-1); border: 1px solid var(--border); color: var(--text-primary); text-decoration: none; }
+.circ { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-size: 30px; line-height: 1; padding-bottom: 4px; }
+.pillbar { display: flex; gap: 4px; border-radius: 999px; padding: 4px 8px; }
+.pillbar a, .pillbar button { width: 38px; height: 38px; display: grid; place-items: center; background: none; border: 0; color: var(--text-primary); font-size: 19px; text-decoration: none; cursor: pointer; }
+.dtitle { padding: 14px 4px 6px; }
+.dtitle-row { display: flex; align-items: center; gap: 10px; }
+.dtitle h1 { margin: 0; font-size: 30px; line-height: 1.1; }
+.fp { margin-top: 8px; font-size: 14px; color: var(--text-secondary); }
+.fp b { color: var(--accent); }
+.tabs {
+  position: sticky; top: 0; z-index: 8; display: flex; gap: 22px; overflow-x: auto; scrollbar-width: none;
+  margin: 8px -12px 0; padding: calc(env(safe-area-inset-top) * 0) 16px 0; background: var(--surface-0); border-bottom: 1px solid var(--border);
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tabs a { flex: none; padding: 12px 0 10px; color: var(--text-secondary); text-decoration: none; font-size: 16px; border-bottom: 3px solid transparent; }
+.tabs a.on { color: var(--accent); border-bottom-color: var(--accent); }
+.dsec { margin-top: 22px; scroll-margin-top: 60px; }
+.dsec-h { display: flex; justify-content: space-between; align-items: baseline; margin: 0 4px 10px; }
+.dsec-h h2 { margin: 0; font-size: 22px; }
+.dsec-h a { text-decoration: none; font-size: 15px; }
+.card.flat { padding: 12px 0; }
+.card.flat > .tiles, .card.flat > .table-scroll, .card.flat > p, .card.flat > .camrow { margin-left: 12px; margin-right: 12px; }
+.card.flat > .scroller { margin-top: 0; }
+details.more { border-top: 1px solid var(--border); margin-top: 12px; padding: 0 12px; }
+details.more summary { cursor: pointer; padding: 14px 0 4px; color: var(--accent); font-weight: 600; list-style: none; }
+details.more summary::after { content: ' ▾'; }
+details.more[open] summary::after { content: ' ▴'; }
+details.more .legend { margin-top: 8px; }
+.camrow { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; }
+.camrow::-webkit-scrollbar { display: none; }
+.camrow .cam { flex: none; width: 190px; }
+.cam.official .ph { aspect-ratio: 16/9; display: grid; place-items: center; font-size: 30px; background: var(--surface-0); }

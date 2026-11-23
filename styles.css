@@ -282,3 +282,22 @@ table.hh td { min-width: 52px; }
 td.hsnow { text-align: left !important; min-width: 80px; }
 .hbar { display: inline-block; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+
+/* ---------- trail map + food ---------- */
+.mapcard { padding: 0 0 12px; overflow: hidden; }
+.minimap { height: 320px; background: #2a2a28; }
+.fullmap { height: calc(100vh - 170px - env(safe-area-inset-top)); min-height: 360px; border-radius: 14px; overflow: hidden; background: #2a2a28; }
+.maplegend { flex-wrap: wrap; padding: 8px 12px 0; justify-content: flex-start; }
+.maplegend i { border-radius: 2px; }
+.leaflet-container { font: 13px -apple-system, BlinkMacSystemFont, sans-serif; }
+.foodwrap { padding: 0 12px; }
+.fh { margin: 6px 0 4px; font-size: 15px; color: var(--text-secondary); font-weight: 600; }
+.fh + div { margin-bottom: 8px; }
+.fitem { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.fico { flex: none; width: 34px; height: 34px; border-radius: 9px; background: var(--surface-2); display: grid; place-items: center; font-size: 18px; }
+.fbody { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fbody b, .fbody span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.facts { flex: none; display: flex; gap: 6px; }
+.facts .btn.sm { padding: 6px 10px; font-size: 13px; }
+details.fmore summary { cursor: pointer; color: var(--accent); padding: 10px 0; font-size: 14px; }
+.leaflet-control-attribution { font-size: 9px !important; line-height: 1.3; max-width: 70%; }

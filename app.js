@@ -121,6 +121,7 @@ function render() {
   document.body.classList.toggle('detail', view === 'resort');
   if (view === 'resort' && byId(id) && sub === 'daily') return renderDaily(byId(id));
   if (view === 'resort' && byId(id) && sub === 'hourly') return renderHourly(byId(id), arg);
+  if (view === 'resort' && byId(id) && sub === 'map') return renderMapFull(byId(id));
   if (view === 'resort' && byId(id)) return renderResort(byId(id));
   if (view === 'settings') return renderSettings();
   if (view === 'manage') return renderManage();
@@ -215,7 +216,7 @@ function toggleFav(id) {
 }
 
 function legendKey() {
-  return `<div class="key"><span><i style="background:var(--snow)"></i>Snow</span><span><i style="background:var(--mixed)"></i>Rain/snow mix</span><span class="muted">Past days: reported where a SNOTEL station exists</span></div>`;
+  return `<div class="key"><span><i style="background:var(--snow)"></i>Snow</span><span><i style="background:var(--mixed)"></i>Rain/snow mix</span></div>`;
 }
 
 function badge(r, cls = '') {
@@ -306,9 +307,11 @@ function renderResort(r) {
     </div>
     <nav class="tabs" id="tabs">
       <a href="#sec-summary" class="on">Snow Summary</a>
-      <a href="#sec-weather">Weather</a>
-      <a href="#sec-report">Snow Report</a>
       <a href="#sec-cams">Cams</a>
+      <a href="#sec-weather">Weather</a>
+      <a href="#sec-map">Trail Map</a>
+      <a href="#sec-food">Food</a>
+      <a href="#sec-report">Snow Report</a>
     </nav>
 
     <section id="sec-summary" class="dsec">
@@ -348,6 +351,20 @@ function renderResort(r) {
       </div>
     </section>
 
+    <section id="sec-map" class="dsec">
+      <div class="dsec-h"><h2>Trail Map</h2><a href="${esc(trailMapLink(r))}" target="_blank" rel="noopener">${r.trailMapUrl ? 'Official map' : 'Find official map'} ↗</a></div>
+      <div class="card flat mapcard">
+        <div id="minimap" class="minimap"></div>
+        ${mapLegend()}
+        <div class="ddlinks" style="padding-top:4px"><a class="btn sm" href="#/resort/${r.id}/map">Full-screen map ›</a></div>
+      </div>
+    </section>
+
+    <section id="sec-food" class="dsec">
+      <div class="dsec-h"><h2>Food &amp; Drink</h2></div>
+      <div class="card flat"><div id="food" class="foodwrap"><p class="small muted">Finding places…</p></div></div>
+    </section>
+
     <section id="sec-report" class="dsec">
       <div class="dsec-h"><h2>Snow Report</h2></div>
       <div class="card flat" id="report">${reportHtml(r, s)}</div>
@@ -365,6 +382,13 @@ function renderResort(r) {
     if (rep) rep.innerHTML = reportHtml(r, s);
   });
   loadCams(r);
+  loadFoodSection(r);
+  // Mount the map only when it's about to scroll into view (saves data).
+  const mm = document.getElementById('minimap');
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((ents) => { if (ents.some((e) => e.isIntersecting)) { io.disconnect(); mountMap(mm, r); } }, { rootMargin: '300px' });
+    io.observe(mm);
+  } else mountMap(mm, r);
 
   const more = document.getElementById('more-chart');
   more.addEventListener('toggle', () => { if (more.open) drawChart(document.getElementById('chart'), s.days, b.days); });
@@ -538,6 +562,111 @@ function hideTips() {
   document.querySelectorAll('.hit.active').forEach((h) => h.classList.remove('active'));
 }
 document.addEventListener('click', hideTips);
+
+// ---------- trail map + food ----------
+let leafletP;
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  leafletP ||= new Promise((resolve, reject) => {
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = '/vendor/leaflet/leaflet.css'; document.head.appendChild(l);
+    const s = document.createElement('script'); s.src = '/vendor/leaflet/leaflet.js'; s.onload = resolve; s.onerror = () => reject(new Error('map library failed to load'));
+    document.head.appendChild(s);
+  });
+  return leafletP;
+}
+
+const trailMapLink = (r) => r.trailMapUrl || `https://www.google.com/search?q=${encodeURIComponent(`${r.name} ${r.state || ''} trail map`)}`;
+const KIND_ICON = { restaurant: '🍽️', cafe: '☕', bar: '🍺', pub: '🍺', fast_food: '🍔' };
+const KIND_LABEL = { restaurant: 'Restaurant', cafe: 'Café', bar: 'Bar', pub: 'Pub', fast_food: 'Quick bite' };
+const miles = (k) => (k < 0.2 ? `${Math.round(k * 3281)} ft` : `${(k * 0.621371).toFixed(k < 16 ? 1 : 0)} mi`);
+const foodCache = new Map();
+
+async function getFood(r) {
+  const c = foodCache.get(r.id);
+  if (c) return c;
+  const p = getJSON(`/api/food?lat=${r.lat}&lon=${r.lon}`).catch((e) => ({ error: e.message, slopeside: [], town: [] }));
+  foodCache.set(r.id, p);
+  const v = await p;
+  if (v.error) foodCache.delete(r.id);
+  return v;
+}
+
+async function mountMap(el, r, { withFood = true } = {}) {
+  try { await loadLeaflet(); } catch (e) { el.innerHTML = `<p class="pad small err">${esc(e.message)}</p>`; return; }
+  if (!el.isConnected) return;
+  const L = window.L;
+  const map = L.map(el, { zoomControl: true, scrollWheelZoom: false, tap: true }).setView([r.lat, r.lon], 14);
+  const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    maxZoom: 17, subdomains: 'abc',
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, SRTM · © <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)',
+  }).addTo(map);
+  const streets = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  });
+  const pistes = L.tileLayer('https://tiles.opensnowmap.org/pistes/{z}/{x}/{y}.png', {
+    maxZoom: 18, attribution: 'Runs & lifts © <a href="https://www.opensnowmap.org">OpenSnowMap</a> (CC-BY-SA)',
+  }).addTo(map);
+  const overlays = { 'Ski runs & lifts': pistes };
+  if (withFood) {
+    const foodLayer = L.layerGroup().addTo(map);
+    overlays['Food & drink'] = foodLayer;
+    getFood(r).then((f) => {
+      [...(f.slopeside || []).map((p) => [p, true]), ...(f.town || []).slice(0, 25).map((p) => [p, false])].forEach(([p, slope]) => {
+        L.circleMarker([p.lat, p.lon], { radius: 7, weight: 2, color: '#fff', fillColor: slope ? '#d95926' : '#8f8e86', fillOpacity: 1 })
+          .bindPopup(`<b>${esc(p.name)}</b><br>${esc(KIND_LABEL[p.kind] || '')}${p.cuisine ? ` · ${esc(p.cuisine)}` : ''}<br>${slope ? 'Slopeside' : miles(p.distKm) + ' away'}`)
+          .addTo(foodLayer);
+      });
+    });
+  }
+  L.control.layers({ Terrain: topo, Streets: streets }, overlays, { collapsed: true }).addTo(map);
+  setTimeout(() => map.invalidateSize(), 50);
+  return map;
+}
+
+function foodList(list, limit, id) {
+  if (!list.length) return '<p class="small muted">None mapped.</p>';
+  const item = (p) => `<div class="fitem">
+      <div class="fico">${KIND_ICON[p.kind] || '🍽️'}</div>
+      <div class="fbody"><b>${esc(p.name)}</b>
+        <span class="small muted">${esc(KIND_LABEL[p.kind] || p.kind)}${p.cuisine ? ` · ${esc(p.cuisine)}` : ''} · ${miles(p.distKm)}</span>
+        ${p.hours ? `<span class="small muted">${esc(p.hours)}</span>` : ''}
+      </div>
+      <div class="facts">
+        <a class="btn sm" href="https://maps.apple.com/?daddr=${p.lat},${p.lon}&q=${encodeURIComponent(p.name)}" target="_blank" rel="noopener">Go</a>
+        ${p.website ? `<a class="btn sm" href="${esc(/^https?:/.test(p.website) ? p.website : `https://${p.website}`)}" target="_blank" rel="noopener">Site</a>` : ''}
+      </div>
+    </div>`;
+  const more = list.length > limit ? `<details class="fmore"><summary>Show ${list.length - limit} more</summary>${list.slice(limit).map(item).join('')}</details>` : '';
+  return `<div id="${id}">${list.slice(0, limit).map(item).join('')}${more}</div>`;
+}
+
+async function loadFoodSection(r) {
+  const el = () => document.getElementById('food');
+  const f = await getFood(r);
+  if (!el() || location.hash !== `#/resort/${r.id}`) return;
+  if (f.error) {
+    el().innerHTML = `<p class="small muted">Couldn't load places right now (${esc(f.error)}).</p><button class="btn sm" id="food-retry">Try again</button>`;
+    document.getElementById('food-retry').onclick = () => { el().innerHTML = '<p class="small muted">Loading…</p>'; loadFoodSection(r); };
+    return;
+  }
+  el().innerHTML = `
+    <h4 class="fh">⛷️ Slopeside &amp; on-mountain</h4>
+    ${foodList(f.slopeside || [], 8, 'f-slope')}
+    <h4 class="fh">🏘️ Nearby town</h4>
+    ${foodList(f.town || [], 10, 'f-town')}
+    <p class="small muted" style="margin-top:10px">From <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Slopeside means inside the mapped ski area or within about 600 m of the base. Hours and listings can be out of date.</p>`;
+}
+
+async function renderMapFull(r) {
+  app.innerHTML = `<div class="dhead"><a class="circ" href="#/resort/${r.id}" aria-label="Back">‹</a><div class="dh-title">${esc(r.name)} trail map</div><a class="circ" href="${esc(trailMapLink(r))}" target="_blank" rel="noopener" aria-label="Official trail map" style="font-size:18px">↗</a></div>
+    <div id="fullmap" class="fullmap"></div>
+    ${mapLegend()}`;
+  mountMap(document.getElementById('fullmap'), r);
+}
+
+function mapLegend() {
+  return `<div class="key maplegend"><span><i style="background:#2ea043"></i>Easy</span><span><i style="background:#2f6fd6"></i>Intermediate</span><span><i style="background:#111;border:1px solid #888"></i>Advanced</span><span><i style="background:#e5a50a"></i>Freeride</span><span><i style="background:#d95926;border-radius:50%"></i>Slopeside food</span></div>`;
+}
 
 // ---------- detailed daily (Day/Night) + hourly ----------
 const detailCache = new Map();

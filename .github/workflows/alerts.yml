@@ -1,0 +1,15 @@
+name: Powder alerts
+
+on:
+  schedule:
+    # ~6 am and ~6 pm Pacific (14:07 and 02:07 UTC)
+    - cron: '7 2,14 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger alert check
+        run: |
+          curl -fsS -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" "${{ secrets.APP_URL }}/api/check-alerts"

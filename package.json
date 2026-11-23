@@ -1,0 +1,15 @@
+{
+  "name": "snowline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal 16-day mountain snow forecast PWA",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "vapid": "web-push generate-vapid-keys"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "web-push": "^3.6.7"
+  }
+}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Snowline</title>
+  <meta name="theme-color" content="#1a1a19" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Snowline" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="icon" href="/icons/icon-192.png" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a href="#/" class="brand" aria-label="Snowline home">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M2 20 9 7l4 6 3-4 6 11z" fill="currentColor"/></svg>
+      Snowline
+    </a>
+    <div class="top-actions">
+      <button id="refresh" class="icon-btn" aria-label="Refresh forecast">↻</button>
+      <a href="#/settings" class="icon-btn" aria-label="Alerts and settings">🔔</a>
+    </div>
+  </header>
+  <main id="app" aria-live="polite"><p class="muted pad">Loading forecast…</p></main>
+  <footer class="foot">
+    Forecast data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0) using NOAA GFS/HRRR, ECMWF IFS and ECCC GEM ·
+    Observations: <a href="https://www.nrcs.usda.gov/wps/portal/wcc/home/" target="_blank" rel="noopener">NRCS SNOTEL</a> ·
+    Webcams: <a href="https://www.windy.com/webcams" target="_blank" rel="noopener">Windy.com</a>
+  </footer>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

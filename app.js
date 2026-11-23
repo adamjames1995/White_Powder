@@ -1,6 +1,9 @@
 import { RESORTS, byId, logoUrl } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS } from '/lib/snow.js';
 
+window.__wpBooted = true;
+const stage = (s) => window.__wpStage?.(s);
+
 const app = document.getElementById('app');
 const refreshBtn = document.getElementById('refresh');
 const CACHE_KEY = 'snowline:forecast:v2';
@@ -52,10 +55,13 @@ async function refresh(force = false) {
   if (!force && state.data && Date.now() - state.fetchedAt < FRESH_MS) return;
   refreshBtn.classList.add('spin');
   try {
-    const data = await loadResorts(RESORTS);
+    stage('requesting forecast');
+    const data = await loadResorts(RESORTS, { onStage: stage });
+    stage('drawing');
     state = { data, fetchedAt: Date.now(), error: null };
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, fetchedAt: state.fetchedAt })); } catch {}
   } catch (e) {
+    stage('failed');
     state.error = e.message || String(e);
   } finally {
     refreshBtn.classList.remove('spin');

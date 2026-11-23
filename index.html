@@ -26,7 +26,24 @@
       <a href="#/settings" class="icon-btn" aria-label="Alerts and settings">🔔</a>
     </div>
   </header>
-  <main id="app" aria-live="polite"><p class="muted pad">Loading forecast…</p></main>
+  <main id="app" aria-live="polite"><p class="muted pad" id="boot">Loading forecast… <span id="boot-stage">starting</span> · <span id="boot-t">0</span>s</p></main>
+  <script>
+    (function () {
+      var t0 = Date.now(), errs = [];
+      window.__wpStage = function (s) { var el = document.getElementById('boot-stage'); if (el) el.textContent = s; };
+      window.addEventListener('error', function (e) { errs.push((e.message || 'error') + (e.filename ? ' @ ' + e.filename.split('/').pop() + ':' + e.lineno : '')); });
+      var iv = setInterval(function () {
+        var b = document.getElementById('boot'); if (!b) { clearInterval(iv); return; }
+        var s = Math.round((Date.now() - t0) / 1000); document.getElementById('boot-t').textContent = s;
+        if (s >= 60) {
+          clearInterval(iv);
+          b.outerHTML = '<div class="pad"><p class="err">Still loading after 60 s.</p><p class="small muted">Stage: ' + (document.getElementById('boot-stage') || {}).textContent +
+            (window.__wpBooted ? '' : ' · app script never started') + '<br>' + errs.join('<br>') + '<br>' + navigator.userAgent +
+            '</p><button class="btn" onclick="location.reload()">Reload</button></div>';
+        }
+      }, 1000);
+    })();
+  </script>
   <footer class="foot">
     Forecast data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (CC BY 4.0) using NOAA GFS/HRRR, ECMWF IFS and ECCC GEM ·
     Observations: <a href="https://www.nrcs.usda.gov/wps/portal/wcc/home/" target="_blank" rel="noopener">NRCS SNOTEL</a> ·

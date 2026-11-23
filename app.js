@@ -123,6 +123,7 @@ function render() {
   if (view === 'resort' && byId(id) && sub === 'daily') return renderDaily(byId(id));
   if (view === 'resort' && byId(id) && sub === 'hourly') return renderHourly(byId(id), arg);
   if (view === 'resort' && byId(id) && sub === 'map') return renderMapFull(byId(id));
+  if (view === 'resort' && byId(id) && sub === 'trailmap') return renderTrailMapImage(byId(id), arg);
   if (view === 'resort' && byId(id)) return renderResort(byId(id));
   if (view === 'settings') return renderSettings();
   if (view === 'manage') return renderManage();
@@ -355,9 +356,11 @@ function renderResort(r) {
     <section id="sec-map" class="dsec">
       <div class="dsec-h"><h2>Trail Map</h2><a href="${esc(trailMapLink(r))}" target="_blank" rel="noopener">${r.trailMapUrl ? 'Official map' : 'Find official map'} ↗</a></div>
       <div class="card flat mapcard">
-        <div id="minimap" class="minimap"></div>
-        ${mapLegend()}
-        <div class="ddlinks" style="padding-top:4px"><a class="btn sm" href="#/resort/${r.id}/map">Full-screen map ›</a></div>
+        <div class="tm-h">Official trail maps</div>
+        <div id="tmaps" class="tmaps"><p class="small muted">Finding trail maps…</p></div>
+        <div class="tm-h">Interactive ski map <span class="muted small">· runs, lifts &amp; difficulty</span></div>
+        <div id="skimap" class="skimap"><p class="small muted pad">Loading ski map…</p></div>
+        <div class="ddlinks" style="padding-top:8px"><a class="btn sm" href="#/resort/${r.id}/map">Full-screen ski map ›</a></div>
       </div>
     </section>
 
@@ -385,11 +388,13 @@ function renderResort(r) {
   loadCams(r);
   loadFoodSection(r);
   // Mount the map only when it's about to scroll into view (saves data).
-  const mm = document.getElementById('minimap');
+  // Load trail maps when the section is about to scroll into view (saves data).
+  const sm = document.getElementById('skimap');
+  const go = () => loadTrailMaps(r);
   if ('IntersectionObserver' in window) {
-    const io = new IntersectionObserver((ents) => { if (ents.some((e) => e.isIntersecting)) { io.disconnect(); mountMap(mm, r); } }, { rootMargin: '300px' });
-    io.observe(mm);
-  } else mountMap(mm, r);
+    const io = new IntersectionObserver((ents) => { if (ents.some((e) => e.isIntersecting)) { io.disconnect(); go(); } }, { rootMargin: '400px' });
+    io.observe(sm);
+  } else go();
 
   const more = document.getElementById('more-chart');
   more.addEventListener('toggle', () => { if (more.open) drawChart(document.getElementById('chart'), s.days, b.days); });
@@ -582,7 +587,7 @@ const KIND_LABEL = { restaurant: 'Restaurant', cafe: 'Café', bar: 'Bar', pub: '
 const miles = (k) => (k < 0.2 ? `${Math.round(k * 3281)} ft` : `${(k * 0.621371).toFixed(k < 16 ? 1 : 0)} mi`);
 const foodCache = new Map();
 
-const FOOD_KEY = (r) => `wp:food:v2:${r.lat.toFixed(3)},${r.lon.toFixed(3)}`;
+const FOOD_KEY = (r) => `wp:food:v3:${r.lat.toFixed(3)},${r.lon.toFixed(3)}`;
 async function getFood(r) {
   const c = foodCache.get(r.id);
   if (c) return c;
@@ -592,12 +597,13 @@ async function getFood(r) {
       if (saved && Date.now() - saved.at < 7 * 864e5) return saved.data;
     } catch {}
     let data;
-    try { data = buildFood(await fetchOverpass(foodQuery(r.lat, r.lon)), r.lat, r.lon); } // straight from OpenStreetMap
+    try { data = await getJSON(`/api/food?lat=${r.lat}&lon=${r.lon}`); } // server: Nominatim + Overpass, cached a day
     catch (e1) {
-      try { data = await getJSON(`/api/food?lat=${r.lat}&lon=${r.lon}`); } // server fallback
-      catch (e2) { return { error: e1.message || String(e1), slopeside: [], town: [] }; }
+      try { data = buildFood(await fetchOverpass(foodQuery(r.lat, r.lon)), r.lat, r.lon); } // phone straight to OpenStreetMap
+      catch (e2) { return { error: `server ${e1.message}; direct ${e2.message}`, slopeside: [], town: [] }; }
     }
-    if (!data.error) try { localStorage.setItem(FOOD_KEY(r), JSON.stringify({ at: Date.now(), data })); } catch {}
+    const found = (data.slopeside?.length || 0) + (data.town?.length || 0);
+    if (!data.error && found) try { localStorage.setItem(FOOD_KEY(r), JSON.stringify({ at: Date.now(), data })); } catch {}
     return data;
   })();
   foodCache.set(r.id, p);
@@ -672,11 +678,63 @@ async function loadFoodSection(r) {
     <p class="small muted" style="margin-top:10px">From <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors. Slopeside means inside the mapped ski area or within about 600 m of the base. Hours and listings can be out of date.</p>`;
 }
 
+// Trail maps: official images (Skimap.org) + interactive OpenSkiMap.
+const tmCache = new Map();
+function getTrailMaps(r) {
+  if (!tmCache.has(r.id)) {
+    tmCache.set(r.id, getJSON(`/api/trailmap?lat=${r.lat}&lon=${r.lon}&name=${encodeURIComponent(r.name)}`)
+      .catch((e) => { tmCache.delete(r.id); return { error: e.message, maps: [] }; }));
+  }
+  return tmCache.get(r.id);
+}
+const openSkiMapUrl = (r, area, zoom = 14) => `https://openskimap.org/${area?.openskimapId ? `?obj=${encodeURIComponent(area.openskimapId)}` : ''}#${zoom}/${r.lat}/${r.lon}`;
+
+async function loadTrailMaps(r) {
+  const t = await getTrailMaps(r);
+  if (location.hash !== `#/resort/${r.id}`) return;
+  const tm = document.getElementById('tmaps'), sm = document.getElementById('skimap');
+  if (sm) sm.innerHTML = `<iframe src="${esc(openSkiMapUrl(r, t.area))}" title="${esc(r.name)} ski map" loading="lazy" allow="fullscreen"></iframe>`;
+  if (!tm) return;
+  const maps = (t.maps || []).filter((m) => m.thumb || m.image);
+  tm.innerHTML = maps.length
+    ? `<div class="tm-row">${maps.map((m, i) => `<a class="tm" href="#/resort/${r.id}/trailmap/${i}"><img src="${esc(m.thumb || m.image)}" alt="${esc(r.name)} trail map${m.year ? ` ${m.year}` : ''}" loading="lazy"/><span>${m.year ? `${m.year} map` : 'Trail map'}</span></a>`).join('')}</div>
+       <p class="small muted" style="margin:6px 12px 0">Published resort maps via <a href="${esc(t.area?.skimapUrl || 'https://skimap.org')}" target="_blank" rel="noopener">Skimap.org</a>. Tap to zoom.</p>`
+    : `<div class="tm-none"><p class="small muted">No published map found in the Skimap.org archive${t.error ? ' right now' : ''}.</p><a class="btn sm" href="${esc(trailMapLink(r))}" target="_blank" rel="noopener">${r.trailMapUrl ? `${esc(r.name)} official trail map ↗` : 'Find the official trail map ↗'}</a></div>`;
+}
+
+async function renderTrailMapImage(r, idx) {
+  app.innerHTML = `<div class="dhead"><a class="circ" href="#/resort/${r.id}" aria-label="Back">‹</a><div class="dh-title">${esc(r.name)}</div><span style="width:46px"></span></div><div id="tmv"><p class="muted pad">Loading map…</p></div>`;
+  const t = await getTrailMaps(r);
+  const maps = (t.maps || []).filter((m) => m.image || m.thumb);
+  const m = maps[Number(idx) || 0];
+  const el = document.getElementById('tmv');
+  if (!el) return;
+  if (!m) { el.innerHTML = `<p class="pad muted">Map not available.</p>`; return; }
+  const src = m.image || m.thumb;
+  el.innerHTML = `
+    ${maps.length > 1 ? `<div class="chiprow">${maps.map((x, i) => `<a class="dchip ${i === Number(idx || 0) ? 'on' : ''}" href="#/resort/${r.id}/trailmap/${i}" style="width:auto;padding:6px 12px"><b style="font-size:14px">${x.year || `Map ${i + 1}`}</b></a>`).join('')}</div>` : ''}
+    <div class="tmv-wrap"><img id="tmv-img" src="${esc(src)}" alt="${esc(r.name)} trail map" /></div>
+    <div class="ddlinks" style="padding:10px 0">
+      <button class="btn sm" id="tmv-zoom">Zoom 2×</button>
+      <a class="btn sm" href="${esc(src)}" target="_blank" rel="noopener">Open full size ↗</a>
+      ${m.pdf ? `<a class="btn sm" href="${esc(m.pdf)}" target="_blank" rel="noopener">PDF ↗</a>` : ''}
+    </div>
+    <p class="small muted">Pinch to zoom, drag to pan. Map${m.year ? ` (${m.year})` : ''} via <a href="${esc(m.page || t.area?.skimapUrl || 'https://skimap.org')}" target="_blank" rel="noopener">Skimap.org</a>; © the resort.</p>`;
+  let z = 1;
+  document.getElementById('tmv-zoom').onclick = (e) => {
+    z = z === 1 ? 2 : z === 2 ? 3 : 1;
+    document.getElementById('tmv-img').style.width = `${z * 100}%`;
+    e.target.textContent = z === 3 ? 'Fit' : `Zoom ${z + 1}×`;
+  };
+}
+
 async function renderMapFull(r) {
-  app.innerHTML = `<div class="dhead"><a class="circ" href="#/resort/${r.id}" aria-label="Back">‹</a><div class="dh-title">${esc(r.name)} trail map</div><a class="circ" href="${esc(trailMapLink(r))}" target="_blank" rel="noopener" aria-label="Official trail map" style="font-size:18px">↗</a></div>
-    <div id="fullmap" class="fullmap"></div>
-    ${mapLegend()}`;
-  mountMap(document.getElementById('fullmap'), r);
+  app.innerHTML = `<div class="dhead"><a class="circ" href="#/resort/${r.id}" aria-label="Back">‹</a><div class="dh-title">${esc(r.name)} ski map</div><span style="width:46px"></span></div>
+    <div id="fullmap" class="fullmap"><p class="muted pad">Loading…</p></div>
+    <p class="small muted" style="margin:8px 4px">Interactive map by <a href="https://openskimap.org" target="_blank" rel="noopener">OpenSkiMap.org</a> (OpenStreetMap data). Tap a run or lift for details.</p>`;
+  const t = await getTrailMaps(r);
+  const el = document.getElementById('fullmap');
+  if (el) el.innerHTML = `<iframe src="${esc(openSkiMapUrl(r, t.area, 14))}" title="${esc(r.name)} ski map" allow="fullscreen"></iframe>`;
 }
 
 function mapLegend() {

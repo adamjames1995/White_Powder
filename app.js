@@ -181,7 +181,7 @@ function renderHome() {
           <div class="rc-title">
             <h2>${esc(r.name)}</h2>
             <div class="sub">${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · ${esc([r.state, r.country].filter(Boolean).join(' · '))}</div>
-            ${pd ? `<span class="pow" title="Powder alert">❄ Powder alert: ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}
+            <div class="chips2"><span class="depth" id="depth-${r.id}">${depthChip(r)}</span>${pd ? `<span class="pow" title="Powder alert">❄ Powder alert: ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</div>
           </div>
           ${star}
         </div>
@@ -221,7 +221,12 @@ function renderHome() {
     toggleFav(b.dataset.star); renderHome();
   }));
   mountStrips(false);
-  list.forEach((r) => loadObs(r).then(() => mountStrips(false, r.id)));
+  list.forEach((r) => loadObs(r).then(async () => {
+    mountStrips(false, r.id);
+    if (!hasStationDepth(r)) await loadModelDepth(r);
+    const el = document.getElementById(`depth-${r.id}`);
+    if (el) el.innerHTML = depthChip(r);
+  }));
   list.filter((r) => !state.data[r.id]?.[getLevel()]).forEach((r) => loadOne(r).then(() => location.hash.length <= 2 && renderHome()));
 }
 
@@ -254,6 +259,40 @@ function mountStrips(labels, onlyId) {
     el.scrollLeft = first ? Math.max(0, histW - 18) : prev; // peek a sliver of history
     el.dataset.mounted = '1';
   });
+}
+
+// ---------- current snow depth ----------
+// Measured depth at the nearest SNOTEL station when there is one; otherwise the forecast model's
+// snow depth at the base elevation (labelled as an estimate).
+const modelDepth = new Map();
+const hasStationDepth = (r) => { const o = snotelCache.get(r.id); return !!(o && !o.error && o.depthIn != null); };
+
+async function loadModelDepth(r) {
+  if (modelDepth.has(r.id)) return;
+  const key = `wp:depth:v1:${r.lat.toFixed(3)},${r.lon.toFixed(3)},${r.baseFt}`;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    if (saved && Date.now() - saved.at < 3 * 3600e3) { modelDepth.set(r.id, saved.in); return; }
+  } catch {}
+  try {
+    const j = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${r.lat}&longitude=${r.lon}&elevation=${Math.round(r.baseFt / 3.28084)}&current=snow_depth&timezone=auto`);
+    const m = j.current?.snow_depth; // meters
+    const inches = Number.isFinite(m) ? Math.round(m * 39.3701) : null;
+    modelDepth.set(r.id, inches);
+    try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), in: inches })); } catch {}
+  } catch { modelDepth.set(r.id, null); }
+}
+
+function depthChip(r) {
+  const o = snotelCache.get(r.id);
+  if (hasStationDepth(r)) {
+    return `<span title="Measured at ${esc(r.snotel.name)} SNOTEL station${o.time ? ` · ${esc(obsTime(o.time))}` : ''}">📏 Base depth <b>${o.depthIn}"</b></span>`;
+  }
+  if (modelDepth.has(r.id)) {
+    const v = modelDepth.get(r.id);
+    return v == null ? '' : `<span title="Forecast-model estimate at base elevation">📏 Base depth <b>~${v}"</b> <span class="muted">est.</span></span>`;
+  }
+  return r.snotel && !o ? '<span class="muted">📏 Base depth…</span>' : '';
 }
 
 function obsTime(iso) {

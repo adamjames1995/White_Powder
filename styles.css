@@ -326,3 +326,9 @@ details.fmore summary { cursor: pointer; color: var(--accent); padding: 10px 0; 
 .dsec-h { flex-wrap: wrap; row-gap: 8px; }
 .dsec-h .levelbar.sm { width: 100%; }
 .dsec-h .levelbar.sm button { flex: 1; padding: 7px 4px; font-size: 13px; }
+
+.chips2 { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; align-items: center; }
+.chips2 .pow { margin-top: 0; }
+.depth { font-size: 13px; color: var(--text-secondary); }
+.depth b { color: var(--text-primary); }
+.depth:empty { display: none; }

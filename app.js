@@ -272,7 +272,8 @@ const statusCache = new Map();
 async function loadStatus(r) {
   const c = statusCache.get(r.id);
   if (c && Date.now() - c.at < 5 * 60e3) return c.data;
-  const q = r.liftie ? `id=${encodeURIComponent(r.liftie)}` : `lat=${r.lat}&lon=${r.lon}&name=${encodeURIComponent(r.name)}`;
+  if (!r.liftie) { statusCache.set(r.id, { at: Date.now(), data: { found: false } }); return { found: false }; }
+  const q = `id=${encodeURIComponent(r.liftie)}`;
   let data;
   try { data = await getJSON(`/api/status?${q}`); } catch { data = { error: true }; }
   statusCache.set(r.id, { at: Date.now(), data });
@@ -287,13 +288,15 @@ function statusInfo(r) {
   const opening = r.opening || (st && st.opening) || null;
   const future = opening && opening > todayIso();
   if (st && !st.error && st.found !== false && st.total > 0) {
+    // The resort's own wording, e.g. "Wind Hold ×3"
+    const why = (st.reasons || []).map((x) => `${x.text}${x.n > 1 ? ` ×${x.n}` : ''}`).join(', ');
     if (st.open > 0) {
-      return { cls: 'open', text: `Open · ${st.open}/${st.total} lifts`, note: st.hold ? `${st.hold} on hold (usually wind/weather)` : '' };
+      return { cls: 'open', text: `Open · ${st.open}/${st.total} lifts`, note: st.hold ? `${st.hold} on hold${why ? ` (${why})` : ''}` : '' };
     }
-    if (st.hold > 0) return { cls: 'hold', text: `On hold · ${st.hold} lift${st.hold > 1 ? 's' : ''} paused`, note: 'Usually wind or weather — check the resort' };
+    if (st.hold > 0) return { cls: 'hold', text: `On hold · ${st.hold} lift${st.hold > 1 ? 's' : ''} paused`, note: why || 'Usually wind or weather — check the resort' };
     if (future) return { cls: 'closed', text: `Closed · Opens ${fmtDate(opening)}` };
     if (st.scheduled > 0) return { cls: 'sched', text: `Opening soon · ${st.scheduled} lifts scheduled today` };
-    return { cls: 'closed', text: 'Closed today', note: opening ? `Season opened ${fmtDate(opening)} · may be weather, wind or end of day` : 'May be weather, wind, end of day or off-season' };
+    return { cls: 'closed', text: 'Closed', note: why || (opening ? `All lifts closed right now (season opened ${fmtDate(opening)})` : 'All lifts closed right now') };
   }
   if (future) return { cls: 'closed', text: `Closed · Opens ${fmtDate(opening)}`, note: 'Expected opening date' };
   if (!st) return { cls: 'muted', text: 'Checking status…' };

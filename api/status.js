@@ -1,73 +1,85 @@
-// Live lift status from Liftie (liftie.info, open source), which reads each resort's own lift-status feed.
-// Pass ?id=<liftie id>, or ?lat=&lon=&name= to find the nearest Liftie resort (within 15 km).
-const BASE = 'https://liftie.info';
-let metaCache = null;
+// Live lift status read straight from each resort's own lift-status feed
+// (same sources Liftie uses: mtnpowder.com JSON for Alterra resorts, the TerrainStatusFeed on Vail Resorts pages).
+import vm from 'node:vm';
 
-async function getJson(url) {
+const FEEDS = {
+  palisades: { type: 'mtnpowder', id: 61, page: 'https://www.palisadestahoe.com/mountain-information/lift-and-grooming-status' },
+  'crystal-mountain': { type: 'mtnpowder', id: 80, page: 'https://www.crystalmountainresort.com/the-mountain/mountain-report' },
+  kirkwood: { type: 'vail', url: 'https://www.kirkwood.com/the-mountain/mountain-conditions/terrain-and-lift-status.aspx' },
+  stevens: { type: 'vail', url: 'https://www.stevenspass.com/the-mountain/mountain-conditions/lift-and-terrain-status.aspx' },
+  'whistler-blackcomb': { type: 'vail', url: 'https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/terrain-and-lift-status.aspx' },
+};
+
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+
+async function get(url, accept = '*/*') {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8000);
+  const t = setTimeout(() => ctrl.abort(), 9000);
   try {
-    const r = await fetch(url, { signal: ctrl.signal, headers: { 'user-agent': 'WhitePowder/1.0 (personal ski app)', accept: 'application/json' } });
+    const r = await fetch(url, { signal: ctrl.signal, headers: { 'user-agent': UA, accept, 'accept-language': 'en-US,en;q=0.9' } });
     const body = await r.text();
-    if (!r.ok) throw new Error(`Liftie ${r.status}: ${body.slice(0, 120)}`);
-    try { return JSON.parse(body); } catch { throw new Error(`Liftie non-JSON: ${body.slice(0, 120)}`); }
+    if (!r.ok) throw new Error(`${new URL(url).host} ${r.status}`);
+    return body;
+  } catch (e) {
+    throw e.name === 'AbortError' ? new Error(`${new URL(url).host} timed out`) : e;
   } finally { clearTimeout(t); }
 }
 
-function km(a, b, c, d) {
-  const R = 6371, t = Math.PI / 180;
-  const x = Math.sin(((c - a) * t) / 2) ** 2 + Math.cos(a * t) * Math.cos(c * t) * Math.sin(((d - b) * t) / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(x));
+const MAP = {
+  open: 'open', opened: 'open', o: 'open', y: 'open', yes: 'open', 1: 'open',
+  closed: 'closed', close: 'closed', closedfortheday: 'closed', closedforseason: 'closed', n: 'closed', no: 'closed', 0: 'closed', 3: 'closed',
+  hold: 'hold', onhold: 'hold', windhold: 'hold', weatherhold: 'hold', maintenancehold: 'hold', mechanicalhold: 'hold', standby: 'hold', delayed: 'hold',
+  scheduled: 'scheduled', expected: 'scheduled', anticipated: 'scheduled', 2: 'scheduled',
+};
+export const coerce = (s) => {
+  const k = String(s ?? '').replace(/[\s_-]+/g, '').toLowerCase();
+  if (MAP[k]) return MAP[k];
+  if (/hold/.test(k)) return 'hold';
+  if (/closed/.test(k)) return 'closed';
+  if (/open/.test(k)) return 'open';
+  return 'scheduled';
+};
+
+export function fromMtnpowder(arr) {
+  return (Array.isArray(arr) ? arr : []).map((l) => ({ name: String(l.Name || '').trim(), raw: String(l.StatusEnglish || l.Status || '').trim(), status: coerce(l.StatusEnglish || l.Status) }));
 }
 
-async function findId(lat, lon, name) {
-  if (!metaCache || Date.now() - metaCache.at > 864e5) metaCache = { at: Date.now(), list: await getJson(`${BASE}/api/meta`) };
-  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  let best = null;
-  for (const m of metaCache.list || []) {
-    if (!Array.isArray(m.ll)) continue;
-    const d = km(lat, lon, m.ll[1], m.ll[0]);
-    const nameHit = name && (norm(m.name).includes(norm(name)) || norm(name).includes(norm(m.name)));
-    const score = d - (nameHit ? 10 : 0);
-    if (d <= 15 && (!best || score < best.score)) best = { id: m.id, score };
-  }
-  return best?.id || null;
+const VAIL = ['closed', 'open', 'hold', 'scheduled'];
+export function fromVailHtml(html) {
+  const i = html.indexOf('TerrainStatusFeed = {');
+  if (i < 0) throw new Error('lift feed not found on page');
+  const start = html.lastIndexOf('<script', i);
+  const end = html.indexOf('</script>', i);
+  const script = html.slice(html.indexOf('>', start) + 1, end);
+  const ctx = { FR: {} };
+  vm.runInNewContext(script, ctx, { timeout: 200 });
+  const lifts = ctx.FR?.TerrainStatusFeed?.Lifts || [];
+  return lifts.map((l) => ({ name: String(l.Name || '').trim(), raw: VAIL[l.Status] || String(l.Status), status: VAIL[l.Status] || 'scheduled' }));
 }
 
-export function summarize(j) {
-  const status = j?.lifts?.status || {};
-  const stats = j?.lifts?.stats || {};
-  const names = (s) => Object.entries(status).filter(([, v]) => v === s).map(([k]) => k);
-  const resortUrl = j?.url ? (typeof j.url === 'string' ? j.url : `${j.url.host || ''}${j.url.pathname || ''}`) : null;
+export function summarize(lifts) {
+  const count = (s) => lifts.filter((l) => l.status === s).length;
+  // Reasons in the resort's own wording for lifts that aren't open (e.g. "Wind Hold", "Closed for Season").
+  const reasons = {};
+  for (const l of lifts) if (l.status !== 'open' && l.raw && !/^(closed|scheduled|open)$/i.test(l.raw)) reasons[l.raw] = (reasons[l.raw] || 0) + 1;
   return {
-    name: j?.name || null,
-    url: resortUrl,
-    open: stats.open || 0,
-    hold: stats.hold || 0,
-    scheduled: stats.scheduled || 0,
-    closed: stats.closed || 0,
-    total: Object.keys(status).length,
-    holdLifts: names('hold').slice(0, 8),
-    opening: typeof j?.opening === 'string' ? j.opening : null,
+    open: count('open'), hold: count('hold'), scheduled: count('scheduled'), closed: count('closed'), total: lifts.length,
+    holdLifts: lifts.filter((l) => l.status === 'hold').map((l) => l.name).slice(0, 8),
+    reasons: Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([text, n]) => ({ text, n })),
   };
 }
 
 export default async function handler(req, res) {
+  const id = String(req.query.id || '').replace(/[^a-z0-9-]/gi, '');
+  const feed = FEEDS[id];
+  if (!feed) { res.setHeader('Cache-Control', 's-maxage=86400'); return res.status(200).json({ found: false }); }
   try {
-    let id = String(req.query.id || '').replace(/[^a-z0-9-]/gi, '');
-    if (!id) {
-      const lat = Number(req.query.lat), lon = Number(req.query.lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: 'id or lat/lon required' });
-      id = await findId(lat, lon, req.query.name);
-      if (!id) {
-        res.setHeader('Cache-Control', 's-maxage=86400');
-        return res.status(200).json({ found: false });
-      }
-    }
-    const j = await getJson(`${BASE}/api/resort/${encodeURIComponent(id)}`);
+    let lifts;
+    if (feed.type === 'mtnpowder') lifts = fromMtnpowder(JSON.parse(await get(`https://mtnpowder.com/feed/${feed.id}/lifts`, 'application/json')));
+    else lifts = fromVailHtml(await get(feed.url, 'text/html'));
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
-    res.status(200).json({ found: true, id, ...summarize(j), source: 'Liftie (liftie.info)', fetchedAt: new Date().toISOString() });
+    res.status(200).json({ found: true, id, url: feed.page || feed.url, ...summarize(lifts), source: 'resort lift-status feed', fetchedAt: new Date().toISOString() });
   } catch (e) {
-    res.status(req.query.debug ? 200 : 502).json({ error: e.message || String(e), cause: String(e.cause?.code || e.cause || '') });
+    res.status(req.query.debug ? 200 : 502).json({ error: e.message || String(e), url: feed.page || feed.url });
   }
 }

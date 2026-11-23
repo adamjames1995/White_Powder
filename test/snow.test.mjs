@@ -94,3 +94,32 @@ test('processPoint splits past days into history', () => {
   assert.deepEqual(out.history.map((d) => d.date), ['2026-11-22', '2026-11-23']);
   assert.equal(out.days[0].date, '2026-11-24');
 });
+
+test('detail: Day/Night periods, SLR, precip type, hourly per date', async () => {
+  const { buildDetail, precipType, compass } = await import('../lib/detail.js');
+  const n = 72, start = Date.UTC(2026, 10, 22, 0);
+  const time = Array.from({ length: n }, (_, i) => new Date(start + i * 3600e3).toISOString().slice(0, 16));
+  const h = { time };
+  for (const { key } of MODELS) {
+    h[`temperature_2m_${key}`] = time.map((_, i) => (i < 30 ? -5 : 4));
+    h[`apparent_temperature_${key}`] = time.map(() => -10);
+    h[`relative_humidity_2m_${key}`] = time.map(() => 80);
+    h[`precipitation_${key}`] = time.map((_, i) => (i >= 18 && i < 42 ? 1 : 0));
+    h[`wind_speed_10m_${key}`] = time.map(() => 10);
+    h[`wind_direction_10m_${key}`] = time.map(() => 112.5);
+    h[`wind_gusts_10m_${key}`] = time.map(() => 20);
+    h[`cloud_cover_${key}`] = time.map(() => 90);
+  }
+  const d = buildDetail({ utc_offset_seconds: 0, hourly: h }, 8000, Date.UTC(2026, 10, 22, 10));
+  assert.equal(d.periods[0].date, '2026-11-22');
+  assert.equal(d.periods[0].part, 'Day');
+  const night = d.periods[1];
+  assert.equal(night.part, 'Night');
+  assert.equal(night.type, 'snow');
+  assert.ok(night.snowIn > 3 && night.slr >= 15, JSON.stringify({ s: night.snowIn, slr: night.slr }));
+  assert.equal(d.periods[2].type, 'rain');
+  assert.equal(compass(112.5), 'ESE');
+  assert.equal(precipType(0, 0), 'none');
+  assert.equal(night.pop, 100);
+  assert.equal(d.hours.filter((x) => x.date === '2026-11-23').length, 24);
+});

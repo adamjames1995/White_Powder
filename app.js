@@ -1,5 +1,6 @@
 import { CATALOG, logoUrl } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS } from '/lib/snow.js';
+import { fetchDetail, compass } from '/lib/detail.js';
 import { getMountains, saveMountains, getFavorites, saveFavorites, uniqueId, measureElevations, searchPlaces, nearestSnotel } from '/lib/store.js';
 
 let RESORTS = getMountains();
@@ -116,8 +117,10 @@ async function getJSON(url) {
 
 // ---------- views ----------
 function render() {
-  const [, view, id] = (location.hash || '#/').split('/');
+  const [, view, id, sub, arg] = (location.hash || '#/').split('/');
   document.body.classList.toggle('detail', view === 'resort');
+  if (view === 'resort' && byId(id) && sub === 'daily') return renderDaily(byId(id));
+  if (view === 'resort' && byId(id) && sub === 'hourly') return renderHourly(byId(id), arg);
   if (view === 'resort' && byId(id)) return renderResort(byId(id));
   if (view === 'settings') return renderSettings();
   if (view === 'manage') return renderManage();
@@ -212,7 +215,7 @@ function toggleFav(id) {
 }
 
 function legendKey() {
-  return `<div class="key"><span><i style="background:var(--hist)"></i>Reported</span><span><i style="background:var(--snow)"></i>Snow</span><span><i style="background:var(--mixed)"></i>Rain/snow mix</span></div>`;
+  return `<div class="key"><span><i style="background:var(--snow)"></i>Snow</span><span><i style="background:var(--mixed)"></i>Rain/snow mix</span><span class="muted">Past days: reported where a SNOTEL station exists</span></div>`;
 }
 
 function badge(r, cls = '') {
@@ -261,11 +264,11 @@ function stripCols(days, scaleMax, labels, hist) {
   return days.map((d) => {
     const h = d.snow >= 0.1 ? Math.max(4, Math.round((d.snow / scaleMax) * BAR_H)) : 0;
     const weekend = [0, 6].includes(dayDate(d.date).getDay());
-    const cls = hist && d.src === 'rep' ? 'hist' : d.mixed ? 'mixed' : '';
+    const cls = d.mixed ? 'mixed' : '';
     const tip = `${dow(d.date)} ${dom(d.date)}: ${inch(d.snow)}${hist ? (d.src === 'rep' ? ' reported' : ' estimated') : ''}`;
     const lbl = labels ? `<div class="vl">${d.snow < 0.5 ? '0' : Math.round(d.snow)}</div>` : '';
     const bar = h ? `<div class="bar ${cls}" style="height:${h}px"></div>` : `<div class="bar zero ${cls}"></div>`;
-    return `<div class="col ${weekend ? 'wk' : ''}" title="${tip}"><div class="bars">${lbl}${bar}</div><div class="dl">${dow(d.date)[0]}</div><div class="dn">${dom(d.date)}</div></div>`;
+    return `<div class="col ${weekend ? 'wk' : ''}" title="${tip}"${hist ? '' : ` data-date="${d.date}"`}><div class="bars">${lbl}${bar}</div><div class="dl">${dow(d.date)[0]}</div><div class="dn">${dom(d.date)}</div></div>`;
   }).join('');
 }
 
@@ -312,6 +315,7 @@ function renderResort(r) {
       <div class="dsec-h"><h2>Snow Summary</h2><span class="muted small">Updated ${ago(state.fetchedAt)}</span></div>
       <div class="card flat">
         <div class="scroller" data-strip="${r.id}" data-labels="1"></div>
+        <div class="ddlinks"><a class="btn sm" href="#/resort/${r.id}/daily">Detailed daily forecast ›</a><a class="btn sm" href="#/resort/${r.id}/hourly/${s.days[0]?.date || ''}">Hourly ›</a></div>
         <details class="more" id="more-chart">
           <summary>Base vs summit · model range</summary>
           <div class="legend">
@@ -320,7 +324,7 @@ function renderResort(r) {
             <span><svg width="10" height="10" style="vertical-align:-1px;margin-right:5px"><line x1="5" x2="5" y1="0" y2="10" stroke="var(--text-secondary)" stroke-width="1.5"/></svg>Model range</span>
           </div>
           <div class="chart-wrap" id="chart"></div>
-          <p class="small muted">Blend of ${esc(models)}. Tap a day for details.</p>
+          <p class="small muted">Blend of ${esc(models)}. Tap a day in this chart for details.</p>
         </details>
       </div>
       ${legendKey()}
@@ -350,6 +354,10 @@ function renderResort(r) {
     </section>`;
 
   mountStrips(true);
+  document.querySelector('[data-strip]')?.addEventListener('click', (e) => {
+    const c = e.target.closest('.col[data-date]');
+    if (c) location.hash = `#/resort/${r.id}/hourly/${c.dataset.date}`;
+  });
   loadObs(r).then(() => {
     if (location.hash !== `#/resort/${r.id}`) return;
     mountStrips(true);
@@ -530,6 +538,110 @@ function hideTips() {
   document.querySelectorAll('.hit.active').forEach((h) => h.classList.remove('active'));
 }
 document.addEventListener('click', hideTips);
+
+// ---------- detailed daily (Day/Night) + hourly ----------
+const detailCache = new Map();
+async function getDetail(r) {
+  const c = detailCache.get(r.id);
+  if (c && Date.now() - c.at < FRESH_MS && c.summitFt === r.summitFt) return c.data;
+  const data = await fetchDetail(r);
+  detailCache.set(r.id, { at: Date.now(), data, summitFt: r.summitFt });
+  return data;
+}
+
+const TYPE_LABEL = { snow: 'Snow', mix: 'Snow/Rain', rain: 'Rain', none: 'None' };
+const pct = (v) => (v == null ? '–' : `${Math.round(v)}%`);
+const in2 = (v) => (v == null ? '–' : v.toFixed(2));
+const snowRange = (p) => (p.snowIn < 0.5 ? inch(p.snowIn) : p.snowMax - p.snowMin >= 1 ? `${Math.max(0, Math.floor(p.snowMin))}-${Math.ceil(p.snowMax)}"` : inch(p.snowIn));
+const hourLabel = (h) => `${h % 12 || 12}${h < 12 ? 'a' : 'p'}`;
+
+function subHeader(r, title, back) {
+  return `<div class="dhead"><a class="circ" href="${back}" aria-label="Back">‹</a><div class="dh-title">${esc(r.name)}</div><span style="width:46px"></span></div>
+    <h2 class="dd-h">${title}</h2>
+    <div class="fp" style="margin:0 4px 10px">Forecast Point <b>${r.summitFt.toLocaleString()} ft</b> <span class="muted">· blend of GFS, ECMWF, GEM</span></div>`;
+}
+
+async function renderDaily(r) {
+  app.innerHTML = subHeader(r, 'Detailed Daily Forecast', `#/resort/${r.id}`) + `<div id="dd"><p class="muted pad">Loading detailed forecast…</p></div>`;
+  let d;
+  try { d = await getDetail(r); } catch (e) {
+    document.getElementById('dd').innerHTML = `<div class="pad"><p class="err">Couldn't load the detailed forecast.</p><p class="small muted">${esc(e.message)}</p><button class="btn" onclick="location.reload()">Try again</button></div>`;
+    return;
+  }
+  if (location.hash !== `#/resort/${r.id}/daily`) return;
+  const P = d.periods;
+  const maxSnow = Math.max(6, ...P.map((p) => p.snowMax));
+  const groups = [];
+  P.forEach((p) => { const g = groups[groups.length - 1]; if (g && g.date === p.date) g.n++; else groups.push({ date: p.date, n: 1 }); });
+  const row = (label, unit, f, cls = '') => `<tr class="${cls}"><th class="rl">${label} <span class="muted">${unit}</span></th>${P.map((p) => `<td class="${p.type !== 'none' && p.snowIn >= 0.1 ? 'hl' : ''}">${f(p)}</td>`).join('')}</tr>`;
+  const snowCell = (p) => {
+    const h = p.snowIn >= 0.1 ? Math.max(5, Math.round((p.snowMax / maxSnow) * 70)) : 0;
+    const hMid = p.snowIn >= 0.1 ? Math.max(4, Math.round((p.snowIn / maxSnow) * 70)) : 0;
+    return `<div class="dd-bar"><div class="dd-v ${p.snowIn >= 0.5 ? 'hlv' : ''}">${snowRange(p)}</div>${h ? `<div class="bar t-${p.type}" style="height:${hMid}px"></div>` : `<div class="bar zero t-${p.type}"></div>`}</div>`;
+  };
+  document.getElementById('dd').innerHTML = `
+    <div class="card flat dd-card"><div class="dd-scroll"><table class="dd">
+      <thead>
+        <tr><th class="rl"></th>${groups.map((g) => `<th colspan="${g.n}" class="dd-date"><a href="#/resort/${r.id}/hourly/${g.date}">${dow(g.date)} <b>${dom(g.date)}</b> ›</a></th>`).join('')}</tr>
+        <tr><th class="rl"></th>${P.map((p) => `<th class="dd-part">${p.part}</th>`).join('')}</tr>
+      </thead>
+      <tbody>
+        <tr class="snowrow"><th class="rl">Snowfall <span class="muted">in</span></th>${P.map((p) => `<td>${snowCell(p)}</td>`).join('')}</tr>
+        ${row('Snow Ratio', 'SLR', (p) => (p.slr ? `${p.slr}:1` : '--'), 'sep')}
+        ${row('Snow Level', 'ft', (p) => (p.snowLevelFt == null ? '–' : (Math.round(p.snowLevelFt / 100) * 100).toLocaleString()))}
+        ${row('Precip Chance', '%', (p) => pct(p.pop))}
+        ${row('Precipitation', 'in', (p) => in2(p.liquidIn))}
+        ${row('Weather', '', (p) => `<span class="wx" title="${TYPE_LABEL[p.type]}">${p.icon}</span>`, 'sep')}
+        ${row('Temperature', '°F', (p) => (p.tempF == null ? '–' : Math.round(p.tempF)))}
+        ${row('Feels Like', '°F', (p) => (p.feelsF == null ? '–' : Math.round(p.feelsF)))}
+        ${row('Rel. Humidity', '%', (p) => (p.rh == null ? '–' : Math.round(p.rh)))}
+        ${row('Wind Speed', 'mph', (p) => `${compass(p.dir)}${p.windMph == null ? '–' : Math.round(p.windMph)}`, 'sep')}
+        ${row('Wind Gust', 'mph', (p) => (p.gustMph == null ? '–' : Math.round(p.gustMph)))}
+        ${row('Cloud Cover', '%', (p) => (p.cloud == null ? '–' : Math.round(p.cloud)), 'sep')}
+      </tbody>
+    </table></div>
+    ${typeLegend()}
+    </div>
+    <p class="small muted" style="margin:10px 4px">Day = 6a–6p (temperature is the high), Night = 6p–6a (temperature is the low). Snowfall shows the model range when the models disagree by an inch or more. ${P.some((p) => p.popSource === 'agreement') ? 'Precip chance is the share of models producing at least 0.01" when a model probability isn\'t available.' : ''} Tap a date for its hourly forecast.</p>`;
+}
+
+function typeLegend() {
+  return `<div class="ptype"><b>Precipitation Type</b><div class="key" style="justify-content:flex-start;margin:6px 0 0">
+    <span><i class="t-snow"></i>Snow</span><span><i class="t-mix"></i>Snow/Rain</span><span><i class="t-rain"></i>Rain</span><span><i class="t-none"></i>None</span></div></div>`;
+}
+
+async function renderHourly(r, date) {
+  app.innerHTML = subHeader(r, 'Hourly Forecast', `#/resort/${r.id}`) + `<div id="hh"><p class="muted pad">Loading hourly forecast…</p></div>`;
+  let d;
+  try { d = await getDetail(r); } catch (e) {
+    document.getElementById('hh').innerHTML = `<div class="pad"><p class="err">Couldn't load the hourly forecast.</p><p class="small muted">${esc(e.message)}</p><button class="btn" onclick="location.reload()">Try again</button></div>`;
+    return;
+  }
+  if (!location.hash.startsWith(`#/resort/${r.id}/hourly`)) return;
+  const sel = d.dates.includes(date) ? date : d.dates[0];
+  const H = d.hours.filter((x) => x.date === sel);
+  const maxSnow = Math.max(1, ...H.map((x) => x.snowIn));
+  const tot = H.reduce((a, x) => a + x.snowIn, 0), liq = H.reduce((a, x) => a + x.liquidIn, 0);
+  document.getElementById('hh').innerHTML = `
+    <div class="chiprow" id="chips">${d.dates.map((dt) => `<a class="dchip ${dt === sel ? 'on' : ''}" href="#/resort/${r.id}/hourly/${dt}"><span>${dow(dt)}</span><b>${dom(dt)}</b></a>`).join('')}</div>
+    <div class="hh-sum">${dayDate(sel).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })} · snow <b>${inch(tot)}</b> · precip <b>${in2(liq)}"</b> </div><div class="hh-sum" style="margin-top:-4px"><a href="#/resort/${r.id}/daily">Day/Night view ›</a></div>
+    <div class="card flat"><div class="dd-scroll"><table class="hh">
+      <thead><tr><th class="rl">Time</th><th></th><th>Temp</th><th>Feels</th><th>Snow</th><th>Precip</th><th>Wind</th><th>Gust</th><th>Cloud</th><th>Snow lvl</th></tr></thead>
+      <tbody>${H.map((x) => `<tr class="${x.snowIn >= 0.1 ? 'hl' : ''}">
+        <th class="rl">${hourLabel(x.hour)}</th>
+        <td class="wx">${x.icon}</td>
+        <td><b>${x.tempF == null ? '–' : Math.round(x.tempF)}°</b></td>
+        <td>${x.feelsF == null ? '–' : Math.round(x.feelsF)}°</td>
+        <td class="hsnow"><span class="hbar t-${x.snowIn >= 0.05 ? x.type : 'none'}" style="width:${x.snowIn >= 0.05 ? Math.max(4, Math.round((x.snowIn / maxSnow) * 34)) : 0}px"></span>${x.snowIn >= 0.05 ? x.snowIn.toFixed(1) + '"' : '0"'}</td>
+        <td><i class="dot t-${x.type}"></i>${in2(x.liquidIn)}</td>
+        <td>${compass(x.dir)} ${x.windMph == null ? '–' : Math.round(x.windMph)}</td>
+        <td>${x.gustMph == null ? '–' : Math.round(x.gustMph)}</td>
+        <td>${x.cloud == null ? '–' : Math.round(x.cloud) + '%'}</td>
+        <td>${x.snowLevelFt == null ? '–' : (Math.round(x.snowLevelFt / 100) * 100).toLocaleString() + "'"}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>${typeLegend()}</div>`;
+  document.querySelector('#chips .on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+}
 
 // ---------- manage mountains ----------
 let searchSeq = 0;

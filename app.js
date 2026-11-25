@@ -6,6 +6,10 @@ import { getMountains, saveMountains, getFavorites, saveFavorites, uniqueId, mea
 
 let RESORTS = getMountains();
 let FAVS = getFavorites();
+// With the "All" tab gone, Favorites is the list: make sure everything already saved shows there (one time).
+if (!localStorage.getItem('wp:allmerge:v1')) {
+  try { RESORTS.forEach((r) => FAVS.add(r.id)); saveFavorites(FAVS); localStorage.setItem('wp:allmerge:v1', '1'); } catch {}
+}
 // Pass mountains that aren't on the user's list yet (shown in the Epic / Ikon views).
 const EXTRA = [];
 const byId = (id) => RESORTS.find((r) => r.id === id) || EXTRA.find((r) => r.id === id);
@@ -198,7 +202,8 @@ function historyDays(r, s) {
 }
 
 function shownList() {
-  const view = localStorage.getItem(VIEW_KEY) || 'fav';
+  let view = localStorage.getItem(VIEW_KEY) || 'fav';
+  if (view !== 'fav' && !PASSES[view]) { view = 'fav'; localStorage.setItem(VIEW_KEY, 'fav'); } // the old "All" tab is gone
   const favs = RESORTS.filter((r) => FAVS.has(r.id));
   let list = view === 'fav' ? favs : RESORTS;
   if (PASSES[view]) {
@@ -362,7 +367,7 @@ function scheduleResort() {
   }, 700);
 }
 
-const delBtn = (r) => (r.extra ? '' : `<button class="sw-del" data-del="${r.id}" aria-label="Remove ${esc(r.name)}">🗑<span>Remove</span></button>`);
+const delBtn = (r) => (r.extra || (localStorage.getItem(VIEW_KEY) || 'fav') !== 'fav' ? '' : `<button class="sw-del" data-del="${r.id}" aria-label="Remove ${esc(r.name)}">🗑<span>Remove</span></button>`);
 function removeMountain(id) {
   const i = RESORTS.findIndex((r) => r.id === id);
   if (i < 0) return;
@@ -416,7 +421,7 @@ function renderHome() {
       </a></div>`;
   }).join('');
   const empty = view === 'fav' && !favCount
-    ? `<div class="card pad"><p>No favorites yet.</p><p class="small muted">Tap ☆ on any mountain under <b>All</b>, or add new mountains with <b>+</b>.</p></div>`
+    ? `<div class="card pad"><p>No favorites yet.</p><p class="small muted">Add mountains with <b>+</b>, or star ☆ one in the Epic or Ikon view.</p></div>`
     : !RESORTS.length ? `<div class="card pad"><p>No mountains yet.</p><a class="btn primary" href="#/manage">Add mountains</a></div>` : '';
   const lvl = getLevel();
   const sortKey = getSort(), home = getHome(), needsHome = sortKey === 'drive' || sortKey === 'best';
@@ -424,7 +429,6 @@ function renderHome() {
     <div class="homebar">
       <div class="seg-ctl views" role="tablist">
         <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favs</button>
-        <button data-view="all" class="${view === 'all' ? 'on' : ''}">All</button>
         <button data-view="epic" class="pass-epic ${view === 'epic' ? 'on' : ''}" aria-label="Epic">${view === 'epic' ? EPIC_WORD : 'Epic'}</button>
         <button data-view="ikon" class="pass-ikon ${view === 'ikon' ? 'on' : ''}" aria-label="Ikon">${view === 'ikon' ? IKON_WORD : 'Ikon'}</button>
       </div>
@@ -1630,7 +1634,7 @@ const TOUR = [
   { sel: '.card.rc .mstatus', title: 'Open or closed', text: 'Live from the resort\'s lift feed. The green circle fills with the share of lifts running; closed resorts show their expected opening date.' },
   { sel: '.card.rc .scroller', title: 'Snow for the next 10 days', text: 'White bars are snow, blue is a rain/snow mix. Swipe right to see the past 15 days, left for days 11–15. Last 24h is measured at the nearest snow station.', tryit: 'Try it — swipe the bars sideways.' },
   { sel: '.card.rc .star', title: 'Favorites', text: 'Tap the star to keep a mountain in your ★ Favorites list.', tryit: 'Tap it to try — tap again to undo.' },
-  { sel: '.homebar .seg-ctl', title: 'Favorites or All', text: 'Flip between your starred mountains, everything on your list, or every Epic / Ikon Pass mountain. The + button adds any resort in the world (or near a ZIP code) or removes mountains. Press and hold any card to drag it into a new spot.', tryit: 'Tap Favorites or All.' },
+  { sel: '.homebar .seg-ctl', title: 'Favorites, Epic or Ikon', text: 'Flip between your favorite mountains and every Epic or Ikon Pass mountain. Swipe a favorite left to remove it. The + button adds any resort in the world (or near a ZIP code) or removes mountains. Press and hold any card to drag it into a new spot.', tryit: 'Tap Epic or Ikon, then back to Favs.' },
   { sel: '.top-actions a[href="#/settings"]', title: 'Powder alerts', text: 'Get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).' },
   { route: () => `#/resort/${tourResort()}`, sel: '#tabs', title: 'Tap any mountain', text: 'Its page has everything: snow summary, live cams, weather, trail map, food and the snow report. Tap a tab to jump there.' },
   { route: () => `#/resort/${tourResort()}`, sel: '.ddlinks', title: 'Day-by-day & hourly', text: 'Open the detailed Day/Night forecast or the hourly view. You can also tap any day in the bars above.' },

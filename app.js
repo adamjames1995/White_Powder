@@ -159,6 +159,7 @@ function shownList() {
 }
 
 function renderHome() {
+  if (sortActive) return; // don't redraw under a card that's being dragged
   if (!state.data) {
     app.innerHTML = state.error
       ? `<div class="pad"><p class="err">Couldn't load the forecast.</p><p class="small muted">${esc(state.error)}</p><button class="btn" onclick="location.reload()">Try again</button></div>`
@@ -171,12 +172,12 @@ function renderHome() {
     const s = state.data[r.id]?.[getLevel()];
     const star = `<button class="star ${FAVS.has(r.id) ? 'on' : ''}" data-star="${r.id}" aria-label="${FAVS.has(r.id) ? 'Remove from' : 'Add to'} favorites">${FAVS.has(r.id) ? '★' : '☆'}</button>`;
     if (!s) {
-      return `<div class="card rc"><div class="rc-head">${badge(r)}<div class="rc-title"><h2>${esc(r.name)}</h2><div class="sub">Loading forecast…</div></div>${star}</div></div>`;
+      return `<div class="card rc" data-id="${r.id}"><div class="rc-head">${badge(r)}<div class="rc-title"><h2>${esc(r.name)}</h2><div class="sub">Loading forecast…</div></div>${star}</div></div>`;
     }
     const pd = prefs.resorts.includes(r.id) ? powderDay(s.days, prefs) : null;
     const wx = weatherNow(s);
     return `
-      <a class="card rc${wx ? ' snowing' : ''}" href="#/resort/${r.id}">
+      <a class="card rc${wx ? ' snowing' : ''}" data-id="${r.id}" href="#/resort/${r.id}">
         ${wx ? precipFx(wx) : ''}
         <div class="rc-head">
           ${badge(r, 'sm')}
@@ -191,7 +192,7 @@ function renderHome() {
       </a>`;
   }).join('');
   const empty = view === 'fav' && !favCount
-    ? `<div class="card pad"><p>No favorites yet.</p><p class="small muted">Tap ☆ on any mountain under <b>All</b>, or add new mountains with <b>Edit</b>.</p></div>`
+    ? `<div class="card pad"><p>No favorites yet.</p><p class="small muted">Tap ☆ on any mountain under <b>All</b>, or add new mountains with <b>+</b>.</p></div>`
     : !RESORTS.length ? `<div class="card pad"><p>No mountains yet.</p><a class="btn primary" href="#/manage">Add mountains</a></div>` : '';
   const lvl = getLevel();
   app.innerHTML = `
@@ -205,7 +206,7 @@ function renderHome() {
         <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favorites</button>
         <button data-view="all" class="${view === 'all' ? 'on' : ''}">All (${RESORTS.length})</button>
       </div>
-      <a class="btn sm" href="#/manage">Edit</a>
+      <a class="addbtn" href="#/manage" aria-label="Add or remove mountains" title="Add or remove mountains">+</a>
     </div>
     <div class="updated">Updated ${ago(state.fetchedAt)} · ${lvl} snowfall · swipe for past 15 days${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
     ${empty}${cards}
@@ -219,6 +220,7 @@ function renderHome() {
   app.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => {
     localStorage.setItem(LEVEL_KEY, b.dataset.level); renderHome();
   }));
+  sortable(app, '.card.rc[data-id]', { longPress: 450, onDrop: applyOrder });
   app.querySelectorAll('[data-star]').forEach((b) => b.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation();
     toggleFav(b.dataset.star); renderHome();
@@ -1018,18 +1020,97 @@ async function renderHourly(r, date) {
 
 // ---------- manage mountains ----------
 let searchSeq = 0;
+// ---------- drag to reorder (touch + mouse) ----------
+// The order of the given ids is applied to RESORTS; mountains not in the list keep their slots.
+function applyOrder(ids) {
+  const set = new Set(ids);
+  const slots = RESORTS.map((r, i) => (set.has(r.id) ? i : -1)).filter((i) => i >= 0);
+  const moved = ids.map((id) => RESORTS.find((r) => r.id === id)).filter(Boolean);
+  slots.forEach((slot, k) => { RESORTS[slot] = moved[k]; });
+  saveMountains(RESORTS);
+}
+
+let sortActive = false;
+function sortable(list, itemSel, { handle, longPress = 0, onDrop }) {
+  if (!list || list.dataset.sortable) return;
+  list.dataset.sortable = '1';
+  let item = null, timer = null, startX = 0, startY = 0, grabY = 0, raf = 0, lastY = 0, moved = false;
+  const items = () => [...list.querySelectorAll(itemSel)];
+  const blockTouch = (e) => { if (sortActive) e.preventDefault(); };
+  document.addEventListener('touchmove', blockTouch, { passive: false });
+
+  const begin = () => {
+    sortActive = true; moved = false;
+    item.classList.add('dragging');
+    list.classList.add('sorting');
+    grabY = lastY - item.getBoundingClientRect().top;
+    if (navigator.vibrate) navigator.vibrate(15);
+    const loop = () => { // auto-scroll near the screen edges
+      if (!sortActive) return;
+      const edge = 90;
+      if (lastY < edge) window.scrollBy(0, -10); else if (lastY > innerHeight - edge) window.scrollBy(0, 10);
+      place(); raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+  };
+  const place = () => {
+    if (!item) return;
+    // move the element in the list when the finger passes a neighbour's midpoint
+    for (const o of items()) {
+      if (o === item) continue;
+      const b = o.getBoundingClientRect(), mid = b.top + b.height / 2;
+      const ib = item.getBoundingClientRect();
+      if (lastY - grabY + ib.height / 2 < mid && o.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING) { list.insertBefore(item, o); moved = true; break; }
+      if (lastY - grabY + ib.height / 2 > mid && o.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_PRECEDING) { list.insertBefore(item, o.nextSibling); moved = true; }
+    }
+    const top = item.getBoundingClientRect().top - (parseFloat(item.style.getPropertyValue('--dy')) || 0);
+    item.style.setProperty('--dy', `${lastY - grabY - top}px`);
+  };
+  const end = () => {
+    clearTimeout(timer); timer = null;
+    if (!item) return;
+    cancelAnimationFrame(raf);
+    const was = sortActive;
+    item.classList.remove('dragging'); item.style.removeProperty('--dy'); list.classList.remove('sorting');
+    item = null; sortActive = false;
+    if (was) {
+      // swallow the click that follows the drop so the card doesn't open
+      const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+      document.addEventListener('click', stop, { capture: true, once: true });
+      setTimeout(() => document.removeEventListener('click', stop, true), 400);
+      if (moved) onDrop(items().map((el) => el.dataset.id));
+    }
+  };
+  list.addEventListener('pointerdown', (e) => {
+    const it = e.target.closest(itemSel);
+    if (!it || !list.contains(it) || (handle && !e.target.closest(handle))) return;
+    if (e.target.closest('[data-strip]') && !handle) { /* allow long-press on the strip too */ }
+    item = it; startX = e.clientX; startY = lastY = e.clientY;
+    if (longPress) timer = setTimeout(() => { timer = null; begin(); }, longPress);
+    else { e.preventDefault(); begin(); }
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!item) return;
+    if (timer) { if (Math.hypot(e.clientX - startX, e.clientY - startY) > 8) { clearTimeout(timer); timer = null; item = null; } return; }
+    lastY = e.clientY;
+  });
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', () => { if (!sortActive) { clearTimeout(timer); timer = null; item = null; } else end(); });
+  list.addEventListener('contextmenu', (e) => { if (sortActive || timer) e.preventDefault(); });
+  list.addEventListener('dragstart', (e) => { if (e.target.closest?.(itemSel) || e.target.parentElement?.closest(itemSel)) e.preventDefault(); });
+}
+
 function renderManage() {
   const inList = (c) => RESORTS.some((r) => Math.abs(r.lat - c.lat) < 0.02 && Math.abs(r.lon - c.lon) < 0.02);
   app.innerHTML = `
     <div class="mhead"><a class="back" href="#/">‹ Done</a><h1 class="title">My mountains</h1></div>
     <section class="section">
-      <h3>Your list · ★ = favorite</h3>
+      <h3>Your list · ★ = favorite · drag ☰ to reorder</h3>
       <div id="mylist">${RESORTS.length ? RESORTS.map((r, i) => `
         <div class="mrow" data-id="${r.id}">
+          <span class="grip" aria-label="Drag to reorder" title="Drag to reorder">☰</span>
           <button class="star ${FAVS.has(r.id) ? 'on' : ''}" data-act="fav" aria-label="Favorite">${FAVS.has(r.id) ? '★' : '☆'}</button>
           <div class="mname"><b>${esc(r.name)}</b><span class="small muted">${esc([r.state, r.country].filter(Boolean).join(', '))}</span><span class="small muted">${r.baseFt.toLocaleString()}–${r.summitFt.toLocaleString()} ft${r.snotel ? ' · SNOTEL' : ''}</span></div>
-          <button class="ib" data-act="up" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
-          <button class="ib" data-act="down" ${i === RESORTS.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
           <button class="ib" data-act="edit" aria-label="Edit elevations">✎</button>
           <button class="ib del" data-act="del" aria-label="Delete">🗑</button>
         </div>`).join('') : '<p class="small muted">No mountains yet — add some below.</p>'}</div>
@@ -1124,6 +1205,7 @@ function renderManage() {
     renderManage();
   });
 
+  sortable(document.getElementById('mylist'), '.mrow[data-id]', { handle: '.grip', onDrop: applyOrder });
   document.getElementById('near-zip').addEventListener('click', () => startOnboarding({ zipStep: true, addMode: true }));
   document.getElementById('reset').addEventListener('click', () => {
     if (!confirm('Replace your list with the original 5 mountains?')) return;
@@ -1233,7 +1315,7 @@ const TUTORIAL = [
   ['👉', 'Swipe the snow bars', 'Swipe a card\'s bars to see the past 15 days of snowfall or days 11–15 of the forecast. Every card moves together.'],
   ['⛰️', 'Summit, Mid or Base', 'The toggle at the top switches every forecast to that elevation — warm storms can be rain at the base and powder up top.'],
   ['📋', 'Tap a mountain for more', 'Detailed day/night and hourly forecasts, live webcams, the trail map, slopeside and in-town food, and the snow report.'],
-  ['⭐', 'Favorites & more mountains', 'Tap ☆ to favorite. Use Edit to add any resort in the world, reorder your list or remove mountains.'],
+  ['⭐', 'Favorites & more mountains', 'Tap ☆ to favorite. Use + to add any resort in the world or remove mountains. Press and hold a card to drag it into a new order.'],
   ['🔔', 'Powder alerts', 'Tap the bell to get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).'],
 ];
 
@@ -1281,7 +1363,7 @@ const TOUR = [
   { sel: '.card.rc .mstatus', title: 'Open or closed', text: 'Live from the resort\'s lift feed. The green circle fills with the share of lifts running; closed resorts show their expected opening date.' },
   { sel: '.card.rc .scroller', title: 'Snow for the next 10 days', text: 'White bars are snow, blue is a rain/snow mix. Swipe right to see the past 15 days, left for days 11–15. Last 24h is measured at the nearest snow station.', tryit: 'Try it — swipe the bars sideways.' },
   { sel: '.card.rc .star', title: 'Favorites', text: 'Tap the star to keep a mountain in your ★ Favorites list.', tryit: 'Tap it to try — tap again to undo.' },
-  { sel: '.homebar .seg-ctl', title: 'Favorites or All', text: 'Flip between your starred mountains and everything on your list. The Edit button next to it adds any resort in the world (or near a ZIP code), reorders or removes mountains.', tryit: 'Tap Favorites or All.' },
+  { sel: '.homebar .seg-ctl', title: 'Favorites or All', text: 'Flip between your starred mountains and everything on your list. The + button adds any resort in the world (or near a ZIP code) or removes mountains. Press and hold any card to drag it into a new spot.', tryit: 'Tap Favorites or All.' },
   { sel: '.top-actions a[href="#/settings"]', title: 'Powder alerts', text: 'Get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).' },
   { route: () => `#/resort/${tourResort()}`, sel: '#tabs', title: 'Tap any mountain', text: 'Its page has everything: snow summary, live cams, weather, trail map, food and the snow report. Tap a tab to jump there.' },
   { route: () => `#/resort/${tourResort()}`, sel: '.ddlinks', title: 'Day-by-day & hourly', text: 'Open the detailed Day/Night forecast or the hourly view. You can also tap any day in the bars above.' },

@@ -608,3 +608,15 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 
 /* Last 24h scrolls with the strip (not pinned) */
 .l24 { position: relative; left: auto; box-shadow: none; }
+
+/* add (+) button on the home bar */
+.addbtn { width: 38px; height: 38px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: #fff; font-size: 26px; font-weight: 500; line-height: 1; text-decoration: none; flex: none; padding-bottom: 2px; }
+.addbtn:active { transform: scale(.94); }
+
+/* drag to reorder */
+.card.rc, .mrow { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.dragging { position: relative; z-index: 50; transform: translateY(var(--dy, 0)) scale(1.02); box-shadow: 0 12px 28px rgba(0,0,0,.55); transition: box-shadow .15s, scale .15s; }
+.card.rc.dragging { outline: 2px solid var(--accent); }
+.mrow.dragging { background: var(--surface-1); border-radius: 10px; }
+.grip { cursor: grab; touch-action: none; color: var(--text-muted); font-size: 18px; padding: 6px 4px; }
+.sorting .card.rc:not(.dragging), .sorting .mrow:not(.dragging) { opacity: .85; }

@@ -600,3 +600,8 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 .tour-block { position: fixed; inset: 0; pointer-events: auto; background: transparent; }
 .tour-tip { pointer-events: auto; }
 .tour-tip .tryit { color: #9ec5ff; font-weight: 600; font-size: 14px; margin-top: -4px; }
+
+/* status line never clips the date: the note gets whatever room is left */
+.rc-head .mstatus { flex-wrap: nowrap; overflow: hidden; }
+.rc-head .mstatus .stext { flex: 0 0 auto; max-width: 100%; white-space: normal; }
+.rc-head .mstatus .snote { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

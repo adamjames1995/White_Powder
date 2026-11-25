@@ -1,4 +1,4 @@
-import { CATALOG, logoUrl, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
+import { CATALOG, logoUrl, openingFor, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS, midFt } from '/lib/snow.js';
 import { fetchDetail, compass } from '/lib/detail.js';
 import { foodQuery, fetchOverpass, buildFood } from '/lib/food.js';
@@ -302,28 +302,29 @@ async function loadStatus(r) {
   return data;
 }
 
-const fmtDate = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const fmtDate = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const todayIso = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60e3).toISOString().slice(0, 10);
 
 function statusInfo(r) {
   const st = statusCache.get(r.id)?.data;
-  const opening = r.opening || (st && st.opening) || null;
-  const future = opening && opening > todayIso();
+  const op = openingFor({ ...r, opening: r.opening || (st && st.opening) || null });
+  const opening = op.date;
+  const future = opening > todayIso();
+  const when = `${op.est ? '~' : ''}${fmtDate(opening)}`;
+  const opensNote = op.typical ? 'Typical date' : op.est ? 'Projected' : 'Announced';
   if (st && !st.error && st.found !== false && st.total > 0) {
-    // The resort's own wording, e.g. "Wind Hold ×3"
     const why = (st.reasons || []).map((x) => `${x.text}${x.n > 1 ? ` ×${x.n}` : ''}`).join(', ');
     if (st.open > 0) {
-      return { cls: 'open', text: `Open · ${st.open}/${st.total} lifts`, note: st.hold ? `${st.hold} on hold${why ? ` (${why})` : ''}` : '' };
+      return { cls: 'open', text: `Open · ${st.open}/${st.total} lifts`, note: st.hold ? `${st.hold} on hold${why ? ` (${why})` : ''}` : `Opened ${fmtDate(opening)}` };
     }
     if (st.hold > 0) return { cls: 'hold', text: `On hold · ${st.hold} lift${st.hold > 1 ? 's' : ''} paused`, note: why || 'Usually wind or weather — check the resort' };
-    if (future) return { cls: 'closed', text: `Closed · Opens ${fmtDate(opening)}` };
+    if (future) return { cls: 'closed', text: `Closed · Opens ${when}`, note: opensNote };
     if (st.scheduled > 0) return { cls: 'sched', text: `Opening soon · ${st.scheduled} lifts scheduled today` };
-    return { cls: 'closed', text: 'Closed', note: why || (opening ? `All lifts closed right now (season opened ${fmtDate(opening)})` : 'All lifts closed right now') };
+    return { cls: 'closed', text: 'Closed', note: why || `All lifts closed right now · season opened ${fmtDate(opening)}` };
   }
-  if (future) return { cls: 'closed', text: `Closed · Opens ${fmtDate(opening)}`, note: 'Expected opening date' };
+  if (future) return { cls: 'closed', text: `Closed · Opens ${when}`, note: opensNote };
   if (!st) return { cls: 'muted', text: 'Checking status…' };
-  if (opening) return { cls: 'muted', text: `Season opened ${fmtDate(opening)}`, note: 'Live lift status unavailable' };
-  return { cls: 'muted', text: 'Live status unavailable' };
+  return { cls: 'muted', text: `${op.est ? 'Season usually opens' : 'Season opened'} ${fmtDate(opening)}`, note: 'Live lift status unavailable' };
 }
 
 function statusLine(r) {
@@ -1083,7 +1084,7 @@ function renderManage() {
       id: uniqueId(c.name, RESORTS), name: c.name, state: c.state || '', country: c.country || '',
       region: [c.state, c.country].filter(Boolean).join(', '),
       lat: c.lat, lon: c.lon, baseFt: elev.baseFt, summitFt: elev.summitFt,
-      snotel, camsUrl: null, site: c.site || null, custom: true,
+      snotel, camsUrl: null, site: c.site || null, opening: c.opening || null, openingEst: !!c.openingEst, custom: true,
     };
     RESORTS.push(r); saveMountains(RESORTS);
     FAVS.add(r.id); saveFavorites(FAVS);
@@ -1163,7 +1164,7 @@ async function buildMountain(c, list) {
   return {
     id: uniqueId(c.name, list), name: c.name, state: c.state || '', country: c.country || '',
     region: [c.state, c.country].filter(Boolean).join(', '), lat: c.lat, lon: c.lon,
-    baseFt: elev.baseFt, summitFt: elev.summitFt, snotel, camsUrl: null, site: c.site || null, custom: true,
+    baseFt: elev.baseFt, summitFt: elev.summitFt, snotel, camsUrl: null, site: c.site || null, opening: c.opening || null, openingEst: !!c.openingEst, custom: true,
   };
 }
 

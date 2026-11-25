@@ -174,13 +174,14 @@ function renderHome() {
       return `<div class="card rc"><div class="rc-head">${badge(r)}<div class="rc-title"><h2>${esc(r.name)}</h2><div class="sub">Loading forecast…</div></div>${star}</div></div>`;
     }
     const pd = prefs.resorts.includes(r.id) ? powderDay(s.days, prefs) : null;
+    const wx = weatherNow(s);
     return `
-      <a class="card rc${(s.current?.snowNowIn || 0) >= 0.02 ? ' snowing' : ''}" href="#/resort/${r.id}">
-        ${(s.current?.snowNowIn || 0) >= 0.02 ? `<div class="flakes" aria-hidden="true">${'<i></i>'.repeat(14)}</div>` : ''}
+      <a class="card rc${wx ? ' snowing' : ''}" href="#/resort/${r.id}">
+        ${wx ? precipFx(wx) : ''}
         <div class="rc-head">
           ${badge(r, 'sm')}
           <div class="rc-title">
-            <h2>${esc(r.name)}${(s.current?.snowNowIn || 0) >= 0.02 ? ' <span class="snow-now">Snowing</span>' : ''}${pd ? ` <span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</h2>
+            <h2>${esc(r.name)}${wx ? ` <span class="snow-now ${wx.kind}">${wx.label}</span>` : ''}${pd ? ` <span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</h2>
             <div class="sub">${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · ${esc(r.state || r.country || '')}<span class="depth" id="depth-${r.id}">${depthChip(r)}</span></div>
             <div class="mstatus" id="status-${r.id}">${statusLine(r)}</div>
           </div>
@@ -234,6 +235,23 @@ function renderHome() {
     if (el) el.innerHTML = statusLine(r);
   }));
   list.filter((r) => !state.data[r.id]?.[getLevel()]).forEach((r) => loadOne(r).then(() => location.hash.length <= 2 && renderHome()));
+}
+
+/** What's falling right now, and how hard (inches of snow per hour; blizzard = heavy snow + strong gusts). */
+function weatherNow(s) {
+  const c = s.current || {};
+  const snow = c.snowNowIn || 0, liq = c.nowPrecip?.liquidIn || 0, rain = c.nowPrecip?.rainShare || 0;
+  if (liq >= 0.01 && rain > 0.25 && rain <= 0.85) return { kind: 'mix', label: 'Rain/snow', n: 12 };
+  if (snow < 0.02 || rain > 0.85) return null;
+  if (snow >= 0.3 && (c.gustMph || 0) >= 35) return { kind: 'blizzard', label: 'Blizzard', n: 40 };
+  if (snow >= 0.5) return { kind: 'heavy', label: 'Heavy snow', n: 28 };
+  if (snow >= 0.15) return { kind: 'mod', label: 'Snowing', n: 16 };
+  return { kind: 'light', label: 'Light snow', n: 7 };
+}
+function precipFx(wx) {
+  const flakes = '<i></i>'.repeat(wx.n);
+  const drops = wx.kind === 'mix' ? '<b></b>'.repeat(12) : '';
+  return `<div class="flakes ${wx.kind}" aria-hidden="true">${flakes}${drops}</div>`;
 }
 
 function toggleFav(id) {
@@ -1200,7 +1218,8 @@ const TUTORIAL = [
   ['🔔', 'Powder alerts', 'Tap the bell to get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).'],
 ];
 
-function showTutorial(intro = '') {
+function showTutorial(intro = '') { return startTour(intro); }
+function showTutorialCards(intro = '') {
   let i = 0;
   const el = modal('<div id="tut"></div>');
   const draw = () => {
@@ -1221,9 +1240,88 @@ function showTutorial(intro = '') {
   const finish = () => {
     el.remove();
     try { localStorage.setItem(ONBOARD_KEY, '1'); } catch {}
-    setTimeout(maybeShowDonate, 400);
+    // (cards version unused; tour is the default)
   };
   draw();
+}
+
+// ---------- guided tour: spotlights the real app, step by step ----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function waitFor(sel, ms = 12000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    const el = document.querySelector(sel);
+    if (el && el.getBoundingClientRect().height > 0) return el;
+    await sleep(100);
+  }
+  return null;
+}
+const tourResort = () => (shownList().list[0] || RESORTS[0])?.id;
+const TOUR = [
+  { sel: '.levelbar', title: 'Summit, Mid or Base', text: 'Switch every forecast to that elevation. Warm storms can be rain at the base and powder up top.' },
+  { sel: '.card.rc .mstatus', title: 'Open or closed', text: 'Live from the resort\'s lift feed. The green circle fills with the share of lifts running; closed resorts show their expected opening date.' },
+  { sel: '.card.rc .scroller', title: 'Snow for the next 10 days', text: 'White bars are snow, blue is a rain/snow mix. Swipe left for the past week, right for days 11–15. Last 24h is measured at the nearest snow station.' },
+  { sel: '.card.rc .star', title: 'Favorites', text: 'Tap the star to keep a mountain in your ★ Favorites list.' },
+  { sel: '.homebar', title: 'Your list', text: 'Flip between Favorites and All. Edit adds any resort in the world (or near a ZIP code), reorders or removes mountains.' },
+  { sel: '.top-actions a[href="#/settings"]', title: 'Powder alerts', text: 'Get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).' },
+  { route: () => `#/resort/${tourResort()}`, sel: '#tabs', title: 'Tap any mountain', text: 'Its page has everything: snow summary, live cams, weather, trail map, food and the snow report. Tap a tab to jump there.' },
+  { route: () => `#/resort/${tourResort()}`, sel: '.ddlinks', title: 'Day-by-day & hourly', text: 'Open the detailed Day/Night forecast or the hourly view. You can also tap any day in the bars above.' },
+  { route: () => `#/resort/${tourResort()}`, sel: '#sec-cams .camrow', title: 'Live webcams', text: 'Tap a LIVE tile to watch the resort\'s own cam right here.' },
+  { route: () => `#/resort/${tourResort()}`, sel: '#sec-map', title: 'Trail map & food', text: 'The official trail map, an interactive ski map with every run named, then slopeside and in-town food below.' },
+  { route: () => '#/', sel: '.brand', title: 'You\'re all set', text: 'Forecasts refresh on their own; tap ↻ any time. Replay this tour from the bottom of the home screen.' },
+];
+
+function startTour(intro = '') {
+  document.querySelector('.tour')?.remove();
+  let i = 0, cur = null, alive = true;
+  const ov = document.createElement('div');
+  ov.className = 'tour';
+  ov.innerHTML = '<div class="tour-hole"></div><div class="tour-tip" role="dialog" aria-live="polite"></div>';
+  document.body.appendChild(ov);
+  const hole = ov.querySelector('.tour-hole'), tip = ov.querySelector('.tour-tip');
+  let curSel = null;
+  const place = () => {
+    if (!cur) return;
+    if (!cur.isConnected && curSel) { cur = document.querySelector(curSel); if (!cur) return; } // page re-rendered
+    const b = cur.getBoundingClientRect(), pad = 6;
+    Object.assign(hole.style, { top: `${b.top - pad}px`, left: `${b.left - pad}px`, width: `${b.width + pad * 2}px`, height: `${b.height + pad * 2}px` });
+    const below = b.bottom + 14, th = tip.offsetHeight || 170;
+    const top = below + th < innerHeight - 10 ? below : Math.max(10, b.top - th - 14);
+    tip.style.top = `${top}px`;
+  };
+  const finish = () => {
+    alive = false; ov.remove();
+    removeEventListener('resize', place); removeEventListener('scroll', place, true);
+    try { localStorage.setItem(ONBOARD_KEY, '1'); } catch {}
+    if (location.hash.startsWith('#/resort/')) location.hash = '#/';
+  };
+  const show = async () => {
+    const st = TOUR[i];
+    const want = st.route ? st.route() : '#/';
+    const here = location.hash || '#/';
+    if (want && here !== want) { location.hash = want; await sleep(350); }
+    const el = await waitFor(st.sel);
+    if (!alive) return;
+    if (!el) { if (i < TOUR.length - 1) { i++; return show(); } return finish(); }
+    el.scrollIntoView({ block: 'center' });
+    await sleep(200);
+    cur = el; curSel = st.sel;
+    tip.innerHTML = `
+      ${i === 0 && intro ? `<p class="small ok">✓ ${esc(intro)}</p>` : ''}
+      <div class="tour-step">${i + 1} of ${TOUR.length}</div>
+      <h3>${st.title}</h3>
+      <p>${st.text}</p>
+      <div class="tut-btns">
+        <button class="btn" id="tour-skip">${i ? 'Back' : 'Skip tour'}</button>
+        <button class="btn primary" id="tour-next">${i === TOUR.length - 1 ? 'Done' : 'Next'}</button>
+      </div>`;
+    tip.querySelector('#tour-next').onclick = () => { if (i < TOUR.length - 1) { i++; show(); } else finish(); };
+    tip.querySelector('#tour-skip').onclick = () => { if (i) { i--; show(); } else finish(); };
+    place();
+  };
+  addEventListener('resize', place); addEventListener('scroll', place, true);
+  const tick = setInterval(() => (alive ? place() : clearInterval(tick)), 400);
+  show();
 }
 
 // ---------- in-app resort webcams (tap to play the resort's own live player) ----------
@@ -1239,8 +1337,8 @@ function openCam(name, embed, r) {
 }
 
 // ---------- first-launch donation note ----------
-function maybeShowDonate() {
-  if (localStorage.getItem(DONATE_KEY)) return;
+function maybeShowDonate(after) {
+  if (localStorage.getItem(DONATE_KEY)) { after?.(); return; }
   const el = document.createElement('div');
   el.className = 'modal';
   el.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="dn-h">
@@ -1252,7 +1350,7 @@ function maybeShowDonate() {
       <button class="btn block" id="dn-later">Maybe later</button>
     </div>`;
   document.body.appendChild(el);
-  const close = () => { try { localStorage.setItem(DONATE_KEY, '1'); } catch {} el.remove(); };
+  const close = () => { try { localStorage.setItem(DONATE_KEY, '1'); } catch {} el.remove(); if (after) setTimeout(after, 250); };
   el.querySelector('#dn-go').addEventListener('click', close);
   el.querySelector('#dn-later').addEventListener('click', close);
 }
@@ -1381,4 +1479,4 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 loadCached();
 safeRender();
 refresh();
-setTimeout(() => (localStorage.getItem(ONBOARD_KEY) ? maybeShowDonate() : startOnboarding()), 700);
+setTimeout(() => (localStorage.getItem(ONBOARD_KEY) ? maybeShowDonate() : maybeShowDonate(() => startOnboarding())), 700);

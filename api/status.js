@@ -45,6 +45,9 @@ export function fromMtnpowder(arr) {
 }
 
 const VAIL = ['closed', 'open', 'hold', 'scheduled'];
+// Vail Resorts pages: the top-level Lifts array only lists lifts that are currently running;
+// the full list lives under each GroomingArea. Merge both (deduped) and cross-check with the
+// "4 / 13 Lifts Open" figure printed on the page.
 export function fromVailHtml(html) {
   const i = html.indexOf('TerrainStatusFeed = {');
   if (i < 0) throw new Error('lift feed not found on page');
@@ -53,8 +56,15 @@ export function fromVailHtml(html) {
   const script = html.slice(html.indexOf('>', start) + 1, end);
   const ctx = { FR: {} };
   vm.runInNewContext(script, ctx, { timeout: 200 });
-  const lifts = ctx.FR?.TerrainStatusFeed?.Lifts || [];
-  return lifts.map((l) => ({ name: String(l.Name || '').trim(), raw: VAIL[l.Status] || String(l.Status), status: VAIL[l.Status] || 'scheduled' }));
+  const f = ctx.FR?.TerrainStatusFeed || {};
+  const seen = new Map();
+  const add = (l) => { const k = l.Id ?? l.Name; if (k == null) return; const prev = seen.get(k); if (!prev || (prev.Status !== 1 && l.Status === 1)) seen.set(k, l); };
+  (f.Lifts || []).forEach(add);
+  (f.GroomingAreas || []).forEach((a) => (a.Lifts || []).forEach(add));
+  const lifts = [...seen.values()].map((l) => ({ name: String(l.Name || '').trim(), raw: VAIL[l.Status] || String(l.Status), status: VAIL[l.Status] || 'scheduled' }));
+  const m = html.match(/(\d+)\s*(?:<[^>]+>\s*)*\/\s*(?:<[^>]+>\s*)*(\d+)(?:\s*<[^>]+>)*\s*Lifts\s*Open/i);
+  if (m) lifts.pageCount = { open: Number(m[1]), total: Number(m[2]) };
+  return lifts;
 }
 
 export function summarize(lifts) {
@@ -62,8 +72,12 @@ export function summarize(lifts) {
   // Reasons in the resort's own wording for lifts that aren't open (e.g. "Wind Hold", "Closed for Season").
   const reasons = {};
   for (const l of lifts) if (l.status !== 'open' && l.raw && !/^(closed|scheduled|open)$/i.test(l.raw)) reasons[l.raw] = (reasons[l.raw] || 0) + 1;
+  // The resort's own printed "open / total" wins when we have it.
+  const pc = lifts.pageCount && lifts.pageCount.total > 0 ? lifts.pageCount : null;
+  const open = pc ? pc.open : count('open'), total = pc ? pc.total : lifts.length;
+  const hold = count('hold'), scheduled = count('scheduled');
   return {
-    open: count('open'), hold: count('hold'), scheduled: count('scheduled'), closed: count('closed'), total: lifts.length,
+    open, hold, scheduled, closed: Math.max(0, total - open - hold - scheduled), total,
     holdLifts: lifts.filter((l) => l.status === 'hold').map((l) => l.name).slice(0, 8),
     reasons: Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([text, n]) => ({ text, n })),
   };
@@ -73,6 +87,11 @@ export default async function handler(req, res) {
   const id = String(req.query.id || '').replace(/[^a-z0-9-]/gi, '');
   const feed = FEEDS[id];
   if (!feed) { res.setHeader('Cache-Control', 's-maxage=86400'); return res.status(200).json({ found: false }); }
+  if (req.query.snip && feed.type === 'mtnpowder') {
+    const arr = JSON.parse(await get(`https://mtnpowder.com/feed/${feed.id}/lifts`, 'application/json'));
+    res.setHeader('Content-Type', 'text/plain');
+    return res.status(200).send([`lifts: ${arr.length}`, `keys: ${Object.keys(arr[0] || {}).join(',')}`, ...arr.map((l) => `${l.Name} | ${l.StatusEnglish || l.Status} | ${l.LiftType || l.Type || ''} | ${l.MountainAreaName || ''}`)].join('\n'));
+  }
   if (req.query.snip && feed.type === 'vail') {
     try {
       const html = await get(feed.url, 'text/html');

@@ -18,3 +18,13 @@ test('vail TerrainStatusFeed parsing', () => {
   assert.deepEqual([s.open, s.hold, s.closed], [1, 1, 1]);
   assert.equal(coerce('Closed for Season'), 'closed');
 });
+
+test('vail feed merges grooming-area lifts and prefers the page count', async () => {
+  const { fromVailHtml, summarize } = await import('../api/status.js');
+  const feed = { Lifts: [{ Id: 1, Name: 'A', Status: 1 }], GroomingAreas: [{ Lifts: [{ Id: 1, Name: 'A', Status: 1 }, { Id: 2, Name: 'B', Status: 0 }, { Id: 3, Name: 'C', Status: 2 }] }] };
+  const html = `<div><span>1</span> / <span>3</span><p>Lifts Open</p></div><script>FR.TerrainStatusFeed = ${JSON.stringify(feed)};</script>`;
+  const s = summarize(fromVailHtml(html));
+  assert.equal(s.open, 1); assert.equal(s.total, 3); assert.equal(s.hold, 1);
+  const s2 = summarize(fromVailHtml(`<script>FR.TerrainStatusFeed = ${JSON.stringify(feed)};</script>`));
+  assert.equal(s2.total, 3);
+});

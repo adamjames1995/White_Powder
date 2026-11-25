@@ -1479,29 +1479,35 @@ async function renderSettings() {
   });
 }
 
-// ---------- strips rest back to their home position when the page scrolls vertically ----------
-let lastStripTouch = 0, snapTimer = null, lastY = window.scrollY;
-document.addEventListener('scroll', (e) => {
-  if (e.target instanceof Element && e.target.matches('[data-strip]') && !e.target.dataset.snapping) lastStripTouch = Date.now();
-}, true);
-['touchstart', 'pointerdown'].forEach((ev) => document.addEventListener(ev, (e) => {
-  if (e.target instanceof Element && e.target.closest('[data-strip]')) lastStripTouch = Date.now();
+// ---------- snow strips: swipe one, they all move; release with "Last 24h" mostly in view and it settles home ----------
+let stripLeader = null, settleTimer = null, touching = false;
+['touchend', 'touchcancel', 'pointerup'].forEach((ev) => document.addEventListener(ev, () => {
+  if (!touching) return;
+  touching = false;
+  if (stripLeader) { clearTimeout(settleTimer); settleTimer = setTimeout(() => settle(stripLeader), 160); }
 }, { passive: true, capture: true }));
-window.addEventListener('scroll', () => {
-  const dy = Math.abs(window.scrollY - lastY);
-  lastY = window.scrollY;
-  if (dy < 2 || Date.now() - lastStripTouch < 500) return; // ignore while a strip is being swiped
-  clearTimeout(snapTimer);
-  snapTimer = setTimeout(() => {
-    document.querySelectorAll('[data-strip][data-home]').forEach((el) => {
-      const home = Number(el.dataset.home);
-      if (Math.abs(el.scrollLeft - home) < 4) return;
-      el.dataset.snapping = '1';
-      el.scrollTo({ left: home, behavior: 'smooth' });
-      setTimeout(() => { delete el.dataset.snapping; }, 600);
-    });
-  }, 120);
-}, { passive: true });
+const strips = () => document.querySelectorAll('[data-strip][data-home]');
+['touchstart', 'pointerdown', 'wheel'].forEach((ev) => document.addEventListener(ev, (e) => {
+  const el = e.target instanceof Element && e.target.closest('[data-strip]');
+  if (el) { stripLeader = el; if (ev !== 'wheel') touching = true; }
+}, { passive: true, capture: true }));
+
+// "Last 24h" is pinned on the left, so swiping toward the forecast never moves it. Swiping back into
+// history pushes it right; on release, if less than half of the past week is showing, it settles home.
+function settle(el) {
+  const home = Number(el.dataset.home);
+  const revealed = home - el.scrollLeft; // px of history pulled into view beyond the resting spot
+  const histW = el.querySelector('.seg.hist')?.offsetWidth || 0;
+  if (revealed > 3 && revealed < histW / 2) el.scrollTo({ left: home, behavior: 'smooth' });
+}
+
+document.addEventListener('scroll', (e) => {
+  const el = e.target;
+  if (!(el instanceof Element) || !el.matches('[data-strip]') || el !== stripLeader) return;
+  for (const o of strips()) if (o !== el && Math.abs(o.scrollLeft - el.scrollLeft) > 0.5) o.scrollLeft = el.scrollLeft;
+  clearTimeout(settleTimer);
+  if (!touching) settleTimer = setTimeout(() => settle(el), 160); // once the swipe (and its momentum) stops
+}, true);
 
 // ---------- boot ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

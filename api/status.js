@@ -76,16 +76,20 @@ export default async function handler(req, res) {
   if (req.query.snip && feed.type === 'vail') {
     try {
       const html = await get(feed.url, 'text/html');
-      const out = {};
-      const i = html.search(/Lifts\s*Open/i);
-      out.near = i >= 0 ? html.slice(Math.max(0, i - 700), i + 100).replace(/\s+/g, ' ') : null;
-      out.vars = [...new Set((html.match(/FR\.[A-Za-z]+\s*=/g) || []))];
-      const j = html.indexOf('TerrainStatusFeed = {');
-      out.feedHead = j >= 0 ? html.slice(j, j + 600).replace(/\s+/g, ' ') : null;
-      const k = html.search(/"?(LiftsOpen|OpenLifts|liftsOpen|TotalLifts)"?\s*:/);
-      out.counts = k >= 0 ? html.slice(Math.max(0, k - 200), k + 300).replace(/\s+/g, ' ') : null;
-      return res.status(200).json(out);
-    } catch (e) { return res.status(200).json({ error: String(e) }); }
+      const k = html.indexOf('TerrainStatusFeed = {');
+      const st = html.lastIndexOf('<script', k), en = html.indexOf('</script>', k);
+      const ctx = { FR: {} };
+      vm.runInNewContext(html.slice(html.indexOf('>', st) + 1, en), ctx, { timeout: 200 });
+      const f = ctx.FR.TerrainStatusFeed || {};
+      const lines = [`keys: ${Object.keys(f).join(',')}`, `lifts: ${(f.Lifts || []).length}`];
+      if (f.Lifts?.[0]) lines.push(`liftkeys: ${Object.keys(f.Lifts[0]).join(',')}`);
+      for (const l of f.Lifts || []) lines.push(`${l.Name} | ${l.Status} | ${l.Type ?? ''} | ${l.Mountain ?? ''}`);
+      for (const [key, v] of Object.entries(f)) if (Array.isArray(v) && key !== 'Lifts') lines.push(`${key}: ${v.length} items; first keys ${v[0] ? Object.keys(v[0]).join(',') : ''}`);
+      const m = html.match(/(\d+)\s*(?:<[^>]+>\s*)*\/\s*(?:<[^>]+>\s*)*(\d+)(?:\s*<[^>]+>)*\s*Lifts\s*Open/i);
+      lines.push(`htmlcount: ${m ? m[1] + '/' + m[2] : 'none'}`);
+      res.setHeader('Content-Type', 'text/plain');
+      return res.status(200).send(lines.join('\n'));
+    } catch (e) { return res.status(200).send(String(e)); }
   }
   try {
     let lifts;

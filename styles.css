@@ -629,3 +629,7 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 .ptr.ready .ptr-ic { transform: rotate(180deg); }
 .ptr.spin .ptr-ic { animation: wp-spin .8s linear infinite; }
 @keyframes wp-spin { to { transform: rotate(360deg); } }
+
+/* strips are moved by one shared offset (see app.js), not native scrolling */
+.scroller { overflow: hidden; touch-action: pan-y; overscroll-behavior-x: auto; }
+.scroller > .strip { will-change: transform; }

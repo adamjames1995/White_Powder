@@ -26,6 +26,7 @@ const FRESH_MS = 30 * 60 * 1000;
 
 let state = { data: null, fetchedAt: 0, error: null };
 const snotelCache = new Map();
+const SX /* shared strip scroll state */ = { x: 0, v: 0, raw: false, mode: null, target: 0, anim: 0, page: null };
 const camsCache = new Map();
 
 // ---------- helpers ----------
@@ -273,19 +274,19 @@ function badge(r, cls = '') {
 /** (Re)render every strip container on the page, keeping scroll position after the first mount. */
 function mountStrips(labels, onlyId) {
   const scale = sharedScale();
+  queueMicrotask(applyX);
   document.querySelectorAll('[data-strip]').forEach((el) => {
     const r = byId(el.dataset.strip);
     if (!r || (onlyId && r.id !== onlyId)) return;
     const s = state.data[r.id]?.[getLevel()];
     if (!s) return;
     const first = !el.dataset.mounted;
-    const prev = el.scrollLeft;
     const compact = el.classList.contains('compact');
     el.innerHTML = snowStrip(historyDays(r, s), s.days.slice(0, 15), last24Box(r, s, compact), scale, labels || el.dataset.labels === '1', compact);
     const histW = el.querySelector('.seg.hist')?.offsetWidth || 0;
     const home = Math.max(0, histW - (compact ? 8 : 18)); // resting spot: a sliver of history peeking, then Last 24 Hours
     el.dataset.home = String(home);
-    el.scrollLeft = first ? home : prev;
+    if (first && SX.page !== location.hash) { SX.page = location.hash; SX.x = home; SX.v = 0; SX.raw = false; }
     el.dataset.mounted = '1';
   });
 }
@@ -411,16 +412,27 @@ function stripCols(days, scaleMax, labels, hist, dims = DIMS.normal) {
   }).join('');
 }
 
+/** Past days in blocks of 5 counted back from yesterday, oldest block on the left: Past 11-15 · Past 6-10 · Past 1-5. */
+function histGroups(history, compact, grp) {
+  const n = history.length, out = [];
+  for (let a = 1; a <= n; a += 5) {
+    const b = Math.min(n, a + 4);
+    const slice = history.slice(n - b, n - a + 1);
+    const total = slice.reduce((t, d) => t + (d.snow || 0), 0);
+    out.unshift(grp(compact ? `Past ${a}-${b}` : `Past ${a}-${b} Days`, total, slice.length).replace('class="grp-line"', 'class="grp-line h"'));
+  }
+  return out.join('');
+}
+
 function snowStrip(history, days, l24, scaleMax, labels, compact) {
   const dims = compact ? DIMS.compact : DIMS.normal;
   const grp = (label, total, n) => `<div class="grp" style="width:${n * dims.col}px"><div class="grp-k">${label}</div><div class="grp-line"><span>${inch(total)}</span></div></div>`;
-  const histTotal = history.reduce((a, d) => a + (d.snow || 0), 0);
   const fcGroups = [0, 5, 10].filter((g) => g < days.length).map((g) => {
     const n = Math.min(5, days.length - g);
     return grp(compact ? `Days ${g + 1}-${g + n}` : `Next ${g + 1}-${g + n} Days`, sumDays(days, g, 5), n);
   }).join('');
   return `<div class="strip ${labels ? 'labels' : ''} ${compact ? 'compact' : ''}">
-    ${history.length ? `<div class="seg hist"><div class="grps">${grp(`Past ${history.length} Days`, histTotal, history.length).replace('class="grp-line"', 'class="grp-line h"')}</div><div class="cols">${stripCols(history, scaleMax, labels, true, dims)}</div></div>` : ''}
+    ${history.length ? `<div class="seg hist"><div class="grps">${histGroups(history, compact, grp)}</div><div class="cols">${stripCols(history, scaleMax, labels, true, dims)}</div></div>` : ''}
     ${l24}
     <div class="seg fc"><div class="grps">${fcGroups}</div><div class="cols">${stripCols(days, scaleMax, labels, false, dims)}</div></div>
   </div>`;
@@ -519,7 +531,7 @@ function renderResort(r) {
   app.querySelectorAll('.dsec [data-level]').forEach((b) => b.addEventListener('click', () => {
     localStorage.setItem(LEVEL_KEY, b.dataset.level);
     app.querySelectorAll('.dsec [data-level]').forEach((x) => x.classList.toggle('on', x === b));
-    const el = document.querySelector('[data-strip]'); if (el) delete el.dataset.mounted;
+    const el = document.querySelector('[data-strip]'); if (el) delete el.dataset.mounted; SX.page = null;
     mountStrips(true);
   }));
   document.querySelector('[data-strip]')?.addEventListener('click', (e) => {
@@ -1561,36 +1573,121 @@ async function renderSettings() {
   });
 }
 
-// ---------- snow strips: swipe one, they all move; release with "Last 24h" mostly in view and it settles home ----------
-let stripLeader = null, settleTimer = null, touching = false;
-['touchend', 'touchcancel', 'pointerup'].forEach((ev) => document.addEventListener(ev, () => {
-  if (!touching) return;
-  touching = false;
-  if (stripLeader) { clearTimeout(settleTimer); settleTimer = setTimeout(() => settle(stripLeader), 160); }
-}, { passive: true, capture: true }));
-const strips = () => document.querySelectorAll('[data-strip][data-home]');
-['touchstart', 'pointerdown', 'wheel'].forEach((ev) => document.addEventListener(ev, (e) => {
-  const el = e.target instanceof Element && e.target.closest('[data-strip]');
-  if (el) { stripLeader = el; if (ev !== 'wheel') touching = true; }
-}, { passive: true, capture: true }));
-
-// On release: if more than half of the "Last 24h" box is still in view, settle it back to its spot.
-function settle(el) {
-  const box = el.querySelector('.l24');
-  if (!box) return;
-  const v = el.getBoundingClientRect(), b = box.getBoundingClientRect();
-  const shown = Math.max(0, Math.min(v.right, b.right) - Math.max(v.left, b.left)) / (b.width || 1);
-  const home = Number(el.dataset.home);
-  if (shown > 0.5 && Math.abs(el.scrollLeft - home) > 3) el.scrollTo({ left: home, behavior: 'smooth' });
+// ---------- snow strips: one shared horizontal position for every row ----------
+// The strips don't scroll natively: one gesture drives a single offset that every row renders,
+// so all rows move, coast and bounce together frame-for-frame.
+const K = 0.00045, C = 2 * Math.sqrt(K); // critically damped spring (per ms)
+const allStrips = () => document.querySelectorAll('[data-strip][data-home]');
+function stripGeom() {
+  const el = document.querySelector('[data-strip][data-home]');
+  const s = el?.firstElementChild;
+  return el && s ? { el, s, W: el.clientWidth, max: Math.max(0, s.offsetWidth - el.clientWidth) } : null;
 }
-
-document.addEventListener('scroll', (e) => {
-  const el = e.target;
-  if (!(el instanceof Element) || !el.matches('[data-strip]') || el !== stripLeader) return;
-  for (const o of strips()) if (o !== el && Math.abs(o.scrollLeft - el.scrollLeft) > 0.5) o.scrollLeft = el.scrollLeft;
-  clearTimeout(settleTimer);
-  if (!touching) settleTimer = setTimeout(() => settle(el), 160); // once the swipe (and its momentum) stops
-}, true);
+const rubber = (d, W) => (1 - 1 / ((d * 0.55) / W + 1)) * W;
+function shownX() {
+  const g = stripGeom();
+  if (!g || !SX.raw) return SX.x;
+  if (SX.x < 0) return -rubber(-SX.x, g.W);
+  if (SX.x > g.max) return g.max + rubber(SX.x - g.max, g.W);
+  return SX.x;
+}
+function applyX() {
+  const d = shownX();
+  for (const el of allStrips()) { const s = el.firstElementChild; if (s) s.style.transform = `translate3d(${-d}px,0,0)`; }
+}
+// Where to rest: home if more than half of "Last 24h" is on screen, otherwise stay.
+function homeTarget() {
+  const g = stripGeom();
+  const box = g?.s.querySelector('.l24');
+  if (!box) return null;
+  const left = box.getBoundingClientRect().left - g.s.getBoundingClientRect().left, w = box.offsetWidth || 1;
+  const seen = Math.max(0, Math.min(SX.x + g.W, left + w) - Math.max(SX.x, left)) / w;
+  const home = Number(g.el.dataset.home);
+  return seen > 0.5 && Math.abs(SX.x - home) > 1 ? home : null;
+}
+function animate() {
+  cancelAnimationFrame(SX.anim);
+  let last = performance.now();
+  const step = (t) => {
+    const dt = Math.min(32, t - last); last = t;
+    const g = stripGeom(); if (!g) { SX.anim = 0; return; }
+    if (SX.mode === 'free') {
+      SX.v *= Math.pow(0.996, dt); SX.x += SX.v * dt;
+      if (SX.x < 0 || SX.x > g.max) { SX.mode = 'spring'; SX.target = SX.x < 0 ? 0 : g.max; } // overshoot → bounce back
+      else if (Math.abs(SX.v) < 0.03) {
+        const h = homeTarget();
+        if (h == null) { SX.v = 0; applyX(); SX.anim = 0; return; }
+        SX.mode = 'spring'; SX.target = h; SX.v = 0;
+      }
+    }
+    if (SX.mode === 'spring') {
+      SX.v += (-K * (SX.x - SX.target) - C * SX.v) * dt; SX.x += SX.v * dt;
+      if (Math.abs(SX.x - SX.target) < 0.4 && Math.abs(SX.v) < 0.02) {
+        SX.x = SX.target; SX.v = 0; applyX();
+        const h = homeTarget();
+        if (h != null) { SX.target = h; } else { SX.anim = 0; return; }
+      }
+    }
+    applyX();
+    SX.anim = requestAnimationFrame(step);
+  };
+  SX.anim = requestAnimationFrame(step);
+}
+let gest = null;
+const swallowClick = () => {
+  const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+  document.addEventListener('click', stop, { capture: true, once: true });
+  setTimeout(() => document.removeEventListener('click', stop, true), 350);
+};
+document.addEventListener('touchstart', (e) => {
+  const el = e.target instanceof Element && e.target.closest('[data-strip]');
+  if (!el || e.touches.length > 1) { gest = null; return; }
+  if (SX.anim) { cancelAnimationFrame(SX.anim); SX.anim = 0; }
+  SX.x = shownX(); SX.raw = false;
+  const t = e.touches[0];
+  gest = { x0: t.clientX, y0: t.clientY, start: SX.x, axis: null, pts: [[performance.now(), t.clientX]] };
+}, { passive: true });
+document.addEventListener('touchmove', (e) => {
+  if (!gest) return;
+  const t = e.touches[0], dx = t.clientX - gest.x0, dy = t.clientY - gest.y0;
+  if (!gest.axis) {
+    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+    gest.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  }
+  if (gest.axis !== 'x' || sortActive) { gest = null; return; }
+  e.preventDefault();
+  SX.raw = true; SX.x = gest.start - dx;
+  gest.pts.push([performance.now(), t.clientX]); if (gest.pts.length > 6) gest.pts.shift();
+  applyX();
+}, { passive: false });
+const endGesture = () => {
+  if (!gest) return;
+  const g0 = gest; gest = null;
+  if (g0.axis !== 'x') return;
+  swallowClick();
+  const [ta, xa] = g0.pts[0], [tb, xb] = g0.pts[g0.pts.length - 1];
+  const v = tb - ta > 0 && performance.now() - tb < 80 ? -(xb - xa) / (tb - ta) : 0;
+  const g = stripGeom();
+  SX.x = shownX(); SX.raw = false;
+  if (g && (SX.x < 0 || SX.x > g.max)) { SX.mode = 'spring'; SX.target = SX.x < 0 ? 0 : g.max; SX.v = 0; }
+  else { SX.mode = 'free'; SX.v = Math.max(-4, Math.min(4, v)); }
+  animate();
+};
+document.addEventListener('touchend', endGesture, { passive: true });
+document.addEventListener('touchcancel', endGesture, { passive: true });
+// trackpad / mouse wheel
+let wheelTimer = 0;
+document.addEventListener('wheel', (e) => {
+  const el = e.target instanceof Element && e.target.closest('[data-strip]');
+  if (!el || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+  e.preventDefault();
+  if (SX.anim) { cancelAnimationFrame(SX.anim); SX.anim = 0; }
+  const g = stripGeom(); if (!g) return;
+  SX.raw = false; SX.x = Math.max(0, Math.min(g.max, SX.x + e.deltaX)); applyX();
+  clearTimeout(wheelTimer);
+  wheelTimer = setTimeout(() => { SX.mode = 'free'; SX.v = 0; animate(); }, 160);
+}, { passive: false });
+window.addEventListener('resize', applyX);
 
 // ---------- pull down to refresh (iOS home-screen apps have no built-in one) ----------
 async function hardRefresh() {

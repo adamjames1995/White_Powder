@@ -8,8 +8,8 @@
   --text-secondary: #c3c2b7;
   --text-muted: #8f8e86;
   --grid: #2f2f2c;
-  --summit: #3987e5;   /* series 1 */
-  --base: #d95926;     /* series 2 */
+  --summit: #f2f5f9;   /* series 1: white */
+  --base: #8f8e86;     /* series 2: gray */
   --accent: #3987e5;
   --good: #0ca30c;
   --radius: 14px;
@@ -116,7 +116,7 @@ select { font: inherit; padding: 8px; border-radius: 8px; background: var(--surf
 .foot a { color: var(--text-secondary); }
 
 /* ---------- resort cards + snow strip ---------- */
-:root { --snow: #9085e9; --mixed: #d95926; --hist: #199e70; --zero: #c3c2b7; }
+:root { --snow: #f2f5f9; --mixed: #3987e5; --hist: #199e70; --zero: #6b6a63; }
 .card.rc { padding: 14px 0 12px 0; }
 .rc-head { display: flex; align-items: center; gap: 12px; padding: 0 14px; }
 .badge {
@@ -161,7 +161,7 @@ select { font: inherit; padding: 8px; border-radius: 8px; background: var(--surf
 .bar { width: 26px; background: var(--snow); border-radius: 4px 4px 0 0; }
 .bar.mixed { background: var(--mixed); }
 .bar.hist { background: var(--hist); }
-.bar.zero { height: 3px; background: var(--zero); opacity: .55; border-radius: 2px; }
+.bar.zero { height: 3px; background: var(--zero); border-radius: 2px; }
 .bar.zero.hist { background: var(--hist); opacity: .9; }
 .dl { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 .dn { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
@@ -263,7 +263,7 @@ tr.snowrow td { vertical-align: bottom; }
 .dd-bar { height: 100px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
 .dd-bar .bar { width: 46px; }
 .dd-v { font-weight: 700; margin-bottom: 4px; }
-.dd-v.hlv, td.hl { color: #b7affa; }
+.dd-v.hlv, td.hl { color: #ffffff; font-weight: 700; }
 .wx { font-size: 20px; }
 .ptype { padding: 12px; border-top: 1px solid var(--border); font-size: 14px; }
 .ptype .key i { border-radius: 50%; }
@@ -342,3 +342,37 @@ details.fmore summary { cursor: pointer; color: var(--accent); padding: 10px 0; 
 .stext.open { color: #3fc93f; } .stext.hold, .stext.sched { color: #f0b429; } .stext.closed { color: #ef8a8a; }
 .snote { color: var(--text-muted); }
 .slink { margin-left: 6px; font-size: 13px; text-decoration: none; }
+
+/* ---------- compact home cards (3 per screen, 10 days visible) ---------- */
+.card.rc { padding: 10px 0 8px; margin-bottom: 8px; }
+.rc-head { gap: 10px; padding: 0 12px; align-items: flex-start; }
+.rc-head .badge.sm { margin-top: 2px; }
+.rc-title h2 { font-size: 16px; line-height: 1.25; }
+.rc-title .sub { font-size: 12px; line-height: 1.35; }
+.rc-title .sub b { color: var(--text-primary); }
+.rc-title .pow { font-size: 11px; padding: 1px 6px; margin: 0 0 0 4px; vertical-align: 2px; border-color: var(--snow); }
+.rc-head .mstatus { margin-top: 1px; font-size: 12px; line-height: 1.3; }
+.rc-head .mstatus .snote { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.rc-head .star { font-size: 20px; padding: 0 2px; }
+.scroller.compact { margin-top: 6px; }
+.strip.compact { padding: 0 8px; }
+.strip.compact .col { width: 25px; }
+.strip.compact .bars { height: 38px; }
+.strip.compact .bar { width: 18px; border-radius: 3px 3px 0 0; }
+.strip.compact .bar.zero { height: 2px; }
+.strip.compact .dl { font-size: 10px; margin-top: 2px; line-height: 1.15; }
+.strip.compact .dn { font-size: 11px; line-height: 1.15; }
+.strip.compact .grp-k { font-size: 10px; line-height: 1.2; }
+.strip.compact .grp-line { height: 15px; margin: 1px 3px 0; }
+.strip.compact .grp-line::before { top: 7px; }
+.strip.compact .grp-line span { font-size: 13px; line-height: 15px; padding: 0 4px; }
+.l24.c { width: 80px; margin: 0 4px; padding: 5px 4px; border-radius: 8px; }
+.l24.c .l24-k { font-size: 10px; }
+.l24.c .l24-v { font-size: 22px; margin: 3px 0; padding: 4px 0; border-radius: 6px; }
+.l24.c .l24-s { font-size: 10px; }
+.levelbar { margin-bottom: 8px; }
+.levelbar button { padding: 7px 8px; font-size: 14px; }
+.homebar { margin-bottom: 4px; }
+.rc-head .mstatus { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
+.rc-head .mstatus .stext { flex: none; }
+.rc-head .mstatus .snote { min-width: 0; flex: 1 1 auto; }

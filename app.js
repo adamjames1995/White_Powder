@@ -177,16 +177,15 @@ function renderHome() {
     return `
       <a class="card rc" href="#/resort/${r.id}">
         <div class="rc-head">
-          ${badge(r)}
+          ${badge(r, 'sm')}
           <div class="rc-title">
-            <h2>${esc(r.name)}</h2>
-            <div class="sub">${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · ${esc([r.state, r.country].filter(Boolean).join(' · '))}</div>
+            <h2>${esc(r.name)}${pd ? ` <span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</h2>
+            <div class="sub">${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · ${esc(r.state || r.country || '')}<span class="depth" id="depth-${r.id}">${depthChip(r)}</span></div>
             <div class="mstatus" id="status-${r.id}">${statusLine(r)}</div>
-            <div class="chips2"><span class="depth" id="depth-${r.id}">${depthChip(r)}</span>${pd ? `<span class="pow" title="Powder alert">❄ Powder alert: ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</div>
           </div>
           ${star}
         </div>
-        <div class="scroller" data-strip="${r.id}"></div>
+        <div class="scroller compact" data-strip="${r.id}"></div>
       </a>`;
   }).join('');
   const empty = view === 'fav' && !favCount
@@ -259,9 +258,12 @@ function mountStrips(labels, onlyId) {
     if (!s) return;
     const first = !el.dataset.mounted;
     const prev = el.scrollLeft;
-    el.innerHTML = snowStrip(historyDays(r, s), s.days.slice(0, 15), last24Box(r, s), scale, labels || el.dataset.labels === '1');
+    const compact = el.classList.contains('compact');
+    el.innerHTML = snowStrip(historyDays(r, s), s.days.slice(0, 15), last24Box(r, s, compact), scale, labels || el.dataset.labels === '1', compact);
     const histW = el.querySelector('.seg.hist')?.offsetWidth || 0;
-    el.scrollLeft = first ? Math.max(0, histW - 18) : prev; // peek a sliver of history
+    const home = Math.max(0, histW - (compact ? 8 : 18)); // resting spot: a sliver of history peeking, then Last 24 Hours
+    el.dataset.home = String(home);
+    el.scrollLeft = first ? home : prev;
     el.dataset.mounted = '1';
   });
 }
@@ -334,13 +336,13 @@ async function loadModelDepth(r) {
 function depthChip(r) {
   const o = snotelCache.get(r.id);
   if (hasStationDepth(r)) {
-    return `<span title="Measured at ${esc(r.snotel.name)} SNOTEL station${o.time ? ` · ${esc(obsTime(o.time))}` : ''}">📏 Base depth <b>${o.depthIn}"</b></span>`;
+    return ` · <span title="Measured at ${esc(r.snotel.name)} SNOTEL station${o.time ? ` · ${esc(obsTime(o.time))}` : ''}">Base <b>${o.depthIn}"</b></span>`;
   }
   if (modelDepth.has(r.id)) {
     const v = modelDepth.get(r.id);
-    return v == null ? '' : `<span title="Forecast-model estimate at base elevation">📏 Base depth <b>~${v}"</b> <span class="muted">est.</span></span>`;
+    return v == null ? '' : ` · <span title="Forecast-model estimate at base elevation">Base <b>~${v}"</b> est.</span>`;
   }
-  return r.snotel && !o ? '<span class="muted">📏 Base depth…</span>' : '';
+  return '';
 }
 
 function obsTime(iso) {
@@ -351,10 +353,17 @@ function obsTime(iso) {
   return `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()} ${h % 12 || 12}:${m}${h < 12 ? 'a' : 'p'}`;
 }
 
-function last24Box(r, s) {
+function last24Box(r, s, compact) {
   const obs = snotelCache.get(r.id);
   const reported = obs && !obs.error && obs.new24In != null;
   const val = reported ? obs.new24In : s.current?.modeled24In;
+  if (compact) {
+    return `<div class="l24 c">
+    <div class="l24-k">Last 24h</div>
+    <div class="l24-v">${inch(val)}</div>
+    <div class="l24-s ${reported ? 'rep' : 'est'}">${reported ? 'Reported ✓' : 'Estimated'}</div>
+  </div>`;
+  }
   return `<div class="l24">
     <div class="l24-k">Last 24 Hours</div>
     <div class="l24-v">${inch(val)}</div>
@@ -363,10 +372,10 @@ function last24Box(r, s) {
   </div>`;
 }
 
-const COL = 34, BAR_H = 64;
-function stripCols(days, scaleMax, labels, hist) {
+const DIMS = { normal: { col: 34, barH: 64 }, compact: { col: 25, barH: 36 } };
+function stripCols(days, scaleMax, labels, hist, dims = DIMS.normal) {
   return days.map((d) => {
-    const h = d.snow >= 0.1 ? Math.max(4, Math.round((d.snow / scaleMax) * BAR_H)) : 0;
+    const h = d.snow >= 0.1 ? Math.max(3, Math.round((d.snow / scaleMax) * dims.barH)) : 0;
     const weekend = [0, 6].includes(dayDate(d.date).getDay());
     const cls = d.mixed ? 'mixed' : '';
     const tip = `${dow(d.date)} ${dom(d.date)}: ${inch(d.snow)}${hist ? (d.src === 'rep' ? ' reported' : ' estimated') : ''}`;
@@ -376,17 +385,18 @@ function stripCols(days, scaleMax, labels, hist) {
   }).join('');
 }
 
-function snowStrip(history, days, l24, scaleMax, labels) {
-  const grp = (label, total, n) => `<div class="grp" style="width:${n * COL}px"><div class="grp-k">${label}</div><div class="grp-line"><span>${inch(total)}</span></div></div>`;
+function snowStrip(history, days, l24, scaleMax, labels, compact) {
+  const dims = compact ? DIMS.compact : DIMS.normal;
+  const grp = (label, total, n) => `<div class="grp" style="width:${n * dims.col}px"><div class="grp-k">${label}</div><div class="grp-line"><span>${inch(total)}</span></div></div>`;
   const histTotal = history.reduce((a, d) => a + (d.snow || 0), 0);
   const fcGroups = [0, 5, 10].filter((g) => g < days.length).map((g) => {
     const n = Math.min(5, days.length - g);
-    return grp(`Next ${g + 1}-${g + n} Days`, sumDays(days, g, 5), n);
+    return grp(compact ? `Days ${g + 1}-${g + n}` : `Next ${g + 1}-${g + n} Days`, sumDays(days, g, 5), n);
   }).join('');
-  return `<div class="strip ${labels ? 'labels' : ''}">
-    ${history.length ? `<div class="seg hist"><div class="grps">${grp(`Past ${history.length} Days`, histTotal, history.length).replace('class="grp-line"', 'class="grp-line h"')}</div><div class="cols">${stripCols(history, scaleMax, labels, true)}</div></div>` : ''}
+  return `<div class="strip ${labels ? 'labels' : ''} ${compact ? 'compact' : ''}">
+    ${history.length ? `<div class="seg hist"><div class="grps">${grp(`Past ${history.length} Days`, histTotal, history.length).replace('class="grp-line"', 'class="grp-line h"')}</div><div class="cols">${stripCols(history, scaleMax, labels, true, dims)}</div></div>` : ''}
     ${l24}
-    <div class="seg fc"><div class="grps">${fcGroups}</div><div class="cols">${stripCols(days, scaleMax, labels, false)}</div></div>
+    <div class="seg fc"><div class="grps">${fcGroups}</div><div class="cols">${stripCols(days, scaleMax, labels, false, dims)}</div></div>
   </div>`;
 }
 
@@ -1187,6 +1197,30 @@ async function renderSettings() {
     renderSettings();
   });
 }
+
+// ---------- strips rest back to their home position when the page scrolls vertically ----------
+let lastStripTouch = 0, snapTimer = null, lastY = window.scrollY;
+document.addEventListener('scroll', (e) => {
+  if (e.target instanceof Element && e.target.matches('[data-strip]') && !e.target.dataset.snapping) lastStripTouch = Date.now();
+}, true);
+['touchstart', 'pointerdown'].forEach((ev) => document.addEventListener(ev, (e) => {
+  if (e.target instanceof Element && e.target.closest('[data-strip]')) lastStripTouch = Date.now();
+}, { passive: true, capture: true }));
+window.addEventListener('scroll', () => {
+  const dy = Math.abs(window.scrollY - lastY);
+  lastY = window.scrollY;
+  if (dy < 2 || Date.now() - lastStripTouch < 500) return; // ignore while a strip is being swiped
+  clearTimeout(snapTimer);
+  snapTimer = setTimeout(() => {
+    document.querySelectorAll('[data-strip][data-home]').forEach((el) => {
+      const home = Number(el.dataset.home);
+      if (Math.abs(el.scrollLeft - home) < 4) return;
+      el.dataset.snapping = '1';
+      el.scrollTo({ left: home, behavior: 'smooth' });
+      setTimeout(() => { delete el.dataset.snapping; }, 600);
+    });
+  }, 120);
+}, { passive: true });
 
 // ---------- boot ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

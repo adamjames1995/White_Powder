@@ -259,7 +259,8 @@ function adoptExtra(id) {
 
 // ---------- sorting ----------
 const SORT_KEY = 'wp:sort:v1';
-const SORTS = { order: 'My order', drive: 'Drive time', depth: 'Base depth', recent: 'Recent snow', best: 'Best snow for the drive' };
+const SORTS = { order: 'My order', drive: 'Closest drive', depth: 'Deepest base', recent: 'Most new snow (72 h)', best: 'Best snow per drive hour' };
+const SORT_SHORT = { order: 'My order', drive: 'Closest', depth: 'Deepest', recent: 'New snow', best: 'Best for drive' };
 const getSort = () => { const v = localStorage.getItem(SORT_KEY); return SORTS[v] ? v : 'order'; };
 const HOME_KEY = 'wp:home:v1';
 const getHome = () => { try { return JSON.parse(localStorage.getItem(HOME_KEY) || 'null'); } catch { return null; } };
@@ -376,7 +377,7 @@ function driveChip(r) {
   const k = getSort();
   if (k !== 'drive' && k !== 'best') return '';
   const d = driveCache.get(r.id);
-  return d ? ` · <span class="drive">🚗 ${d.est ? '~' : ''}${fmtDrive(d.min)}</span>` : '';
+  return d ? `<span class="drive">🚗 ${d.est ? '~' : ''}${fmtDrive(d.min)}</span> · ` : '';
 }
 
 function renderHome() {
@@ -404,7 +405,7 @@ function renderHome() {
           ${badge(r, 'sm')}
           <div class="rc-title">
             <h2>${esc(r.name)}${passChip(r)}${wx ? ` <span class="snow-now ${wx.kind}">${wx.label}</span>` : ''}${pd ? ` <span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</h2>
-            <div class="sub">${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · ${esc(r.state || r.country || '')}<span class="depth" id="depth-${r.id}">${depthChip(r)}</span>${driveChip(r)}</div>
+            <div class="sub">${driveChip(r) || `${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · `}${esc(r.state || r.country || '')}<span class="depth" id="depth-${r.id}">${depthChip(r)}</span></div>
             <div class="mstatus" id="status-${r.id}">${statusLine(r)}</div>
           </div>
           ${star}
@@ -418,11 +419,6 @@ function renderHome() {
   const lvl = getLevel();
   const sortKey = getSort(), home = getHome(), needsHome = sortKey === 'drive' || sortKey === 'best';
   app.innerHTML = `
-    <div class="levelbar" role="radiogroup" aria-label="Forecast elevation">
-      <button data-level="summit" class="${lvl === 'summit' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'summit'}">▲ Summit</button>
-      <button data-level="mid" class="${lvl === 'mid' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'mid'}">◆ Mid</button>
-      <button data-level="base" class="${lvl === 'base' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'base'}">▼ Base</button>
-    </div>
     <div class="homebar">
       <div class="seg-ctl views" role="tablist">
         <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favs</button>
@@ -432,13 +428,22 @@ function renderHome() {
       </div>
       <a class="addbtn" href="#/manage" aria-label="Add or remove mountains" title="Add or remove mountains">+</a>
     </div>
-    <div class="sortbar">
-      <label>Sort <select id="sortby">${Object.entries(SORTS).map(([k, v]) => `<option value="${k}" ${k === sortKey ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
-      ${needsHome ? `<button class="linkbtn" id="sethome">📍 ${home ? `From ${esc(home.label)} · change` : 'Set your starting point'}</button>` : ''}
+    <div class="toolbar">
+      <div class="levelbar mini" role="radiogroup" aria-label="Forecast elevation">
+        <button data-level="summit" class="${lvl === 'summit' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'summit'}">Summit</button>
+        <button data-level="mid" class="${lvl === 'mid' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'mid'}">Mid</button>
+        <button data-level="base" class="${lvl === 'base' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'base'}">Base</button>
+      </div>
+      <label class="sortpill" aria-label="Sort mountains">⇅ <span>${SORT_SHORT[sortKey]}</span>
+        <select id="sortby">${Object.entries(SORTS).map(([k, v]) => `<option value="${k}" ${k === sortKey ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      </label>
     </div>
-    ${PASSES[view] ? `<div class="small muted passnote">${list.length} ${PASSES[view]} Pass mountains${passBuilding.has(view) ? ' · loading the rest…' : ''} · ☆ adds one to your list</div>` : ''}
-    ${sortKey === 'best' ? '<div class="small muted passnote">Ranked by fresh snow (last 72 h) and base depth per hour of driving.</div>' : ''}
-    <div class="updated">Updated ${ago(state.fetchedAt)} · ${lvl} snowfall · swipe for past 15 days${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
+    <div class="updated">${[
+      PASSES[view] ? `${list.length} ${PASSES[view]} mountains${passBuilding.has(view) ? ' (loading…)' : ''}` : '',
+      needsHome ? `<button class="linkbtn" id="sethome">📍 ${home ? esc(home.label) : 'Set start'}</button>` : '',
+      `Updated ${ago(state.fetchedAt)}`,
+      state.error ? '<span class="err">refresh failed</span>' : '',
+    ].filter(Boolean).join(' · ')}</div>
     ${empty}${cards}
     ${list.length ? legendKey() : ''}
     <p class="support"><a href="#" id="replay-tut">How White Powder works</a> · <a href="${VENMO_URL}" target="_blank" rel="noopener">♥ Support White Powder</a></p>`;
@@ -1619,10 +1624,11 @@ async function waitFor(sel, ms = 12000) {
 const tourResort = () => (shownList().list[0] || RESORTS[0])?.id;
 const TOUR = [
   { sel: '.levelbar', title: 'Summit, Mid or Base', text: 'Switch every forecast to that elevation. Warm storms can be rain at the base and powder up top.', tryit: 'Pick your favorite now — tap Summit, Mid or Base.' },
+  { sel: '.sortpill', title: 'Sort', text: 'Order mountains by closest drive, deepest base, most new snow, or best snow per hour of driving.' },
   { sel: '.card.rc .mstatus', title: 'Open or closed', text: 'Live from the resort\'s lift feed. The green circle fills with the share of lifts running; closed resorts show their expected opening date.' },
   { sel: '.card.rc .scroller', title: 'Snow for the next 10 days', text: 'White bars are snow, blue is a rain/snow mix. Swipe right to see the past 15 days, left for days 11–15. Last 24h is measured at the nearest snow station.', tryit: 'Try it — swipe the bars sideways.' },
   { sel: '.card.rc .star', title: 'Favorites', text: 'Tap the star to keep a mountain in your ★ Favorites list.', tryit: 'Tap it to try — tap again to undo.' },
-  { sel: '.homebar .seg-ctl', title: 'Favorites or All', text: 'Flip between your starred mountains and everything on your list. The + button adds any resort in the world (or near a ZIP code) or removes mountains. Press and hold any card to drag it into a new spot.', tryit: 'Tap Favorites or All.' },
+  { sel: '.homebar .seg-ctl', title: 'Favorites or All', text: 'Flip between your starred mountains, everything on your list, or every Epic / Ikon Pass mountain. The + button adds any resort in the world (or near a ZIP code) or removes mountains. Press and hold any card to drag it into a new spot.', tryit: 'Tap Favorites or All.' },
   { sel: '.top-actions a[href="#/settings"]', title: 'Powder alerts', text: 'Get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).' },
   { route: () => `#/resort/${tourResort()}`, sel: '#tabs', title: 'Tap any mountain', text: 'Its page has everything: snow summary, live cams, weather, trail map, food and the snow report. Tap a tab to jump there.' },
   { route: () => `#/resort/${tourResort()}`, sel: '.ddlinks', title: 'Day-by-day & hourly', text: 'Open the detailed Day/Night forecast or the hourly view. You can also tap any day in the bars above.' },

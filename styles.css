@@ -666,3 +666,15 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 .seg-ctl.views button .passico { width: 14px; height: 14px; }
 .seg-ctl.views .pass-epic.on { background: #f26b1d; color: #fff; }
 .seg-ctl.views .pass-ikon.on { background: #ffd200; color: #111; }
+
+/* tidy top area: views + add on one row; elevation + sort on a slim second row */
+.homebar { margin: 2px 2px 8px; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 2px 4px; }
+.levelbar.mini { margin: 0; padding: 2px; border-radius: 9px; flex: none; }
+.levelbar.mini button { flex: none; padding: 5px 11px; font-size: 13px; font-weight: 600; border-radius: 7px; }
+.sortpill { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 6px 11px; border-radius: 9px; background: var(--surface-1); border: 1px solid var(--border); color: var(--text-primary); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.sortpill select { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; font-size: 16px; cursor: pointer; }
+.updated .linkbtn { font-size: 12px; padding: 0; }
+.rc-title .sub .drive { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
+/* Epic's icon is orange; on the orange chip/tab show it white so it stands out */
+.passchip.epic .passico, .seg-ctl.views .pass-epic.on .passico { filter: brightness(0) invert(1); }

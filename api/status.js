@@ -34,7 +34,7 @@ const MAP = {
 export const coerce = (s) => {
   const k = String(s ?? '').replace(/[\s_-]+/g, '').toLowerCase();
   if (MAP[k]) return MAP[k];
-  if (/hold/.test(k)) return 'hold';
+  if (/hold|wind|weather|delay|standby|mechanical/.test(k)) return 'hold';
   if (/closed/.test(k)) return 'closed';
   if (/open/.test(k)) return 'open';
   return 'scheduled';
@@ -87,29 +87,6 @@ export default async function handler(req, res) {
   const id = String(req.query.id || '').replace(/[^a-z0-9-]/gi, '');
   const feed = FEEDS[id];
   if (!feed) { res.setHeader('Cache-Control', 's-maxage=86400'); return res.status(200).json({ found: false }); }
-  if (req.query.snip && feed.type === 'mtnpowder') {
-    const arr = JSON.parse(await get(`https://mtnpowder.com/feed/${feed.id}/lifts`, 'application/json'));
-    res.setHeader('Content-Type', 'text/plain');
-    return res.status(200).send([`lifts: ${arr.length}`, `keys: ${Object.keys(arr[0] || {}).join(',')}`, ...arr.map((l) => `${l.Name} | ${l.StatusEnglish || l.Status} | ${l.LiftType || l.Type || ''} | ${l.MountainAreaName || ''}`)].join('\n'));
-  }
-  if (req.query.snip && feed.type === 'vail') {
-    try {
-      const html = await get(feed.url, 'text/html');
-      const k = html.indexOf('TerrainStatusFeed = {');
-      const st = html.lastIndexOf('<script', k), en = html.indexOf('</script>', k);
-      const ctx = { FR: {} };
-      vm.runInNewContext(html.slice(html.indexOf('>', st) + 1, en), ctx, { timeout: 200 });
-      const f = ctx.FR.TerrainStatusFeed || {};
-      const lines = [`keys: ${Object.keys(f).join(',')}`, `lifts: ${(f.Lifts || []).length}`];
-      if (f.Lifts?.[0]) lines.push(`liftkeys: ${Object.keys(f.Lifts[0]).join(',')}`);
-      for (const l of f.Lifts || []) lines.push(`${l.Name} | ${l.Status} | ${l.Type ?? ''} | ${l.Mountain ?? ''}`);
-      for (const [key, v] of Object.entries(f)) if (Array.isArray(v) && key !== 'Lifts') lines.push(`${key}: ${v.length} items; first keys ${v[0] ? Object.keys(v[0]).join(',') : ''}`);
-      const m = html.match(/(\d+)\s*(?:<[^>]+>\s*)*\/\s*(?:<[^>]+>\s*)*(\d+)(?:\s*<[^>]+>)*\s*Lifts\s*Open/i);
-      lines.push(`htmlcount: ${m ? m[1] + '/' + m[2] : 'none'}`);
-      res.setHeader('Content-Type', 'text/plain');
-      return res.status(200).send(lines.join('\n'));
-    } catch (e) { return res.status(200).send(String(e)); }
-  }
   try {
     let lifts;
     if (feed.type === 'mtnpowder') lifts = fromMtnpowder(JSON.parse(await get(`https://mtnpowder.com/feed/${feed.id}/lifts`, 'application/json')));

@@ -7,7 +7,8 @@ const FEEDS = {
   'crystal-mountain': { type: 'mtnpowder', id: 80, page: 'https://www.crystalmountainresort.com/the-mountain/mountain-report' },
   kirkwood: { type: 'vail', url: 'https://www.kirkwood.com/the-mountain/mountain-conditions/terrain-and-lift-status.aspx' },
   stevens: { type: 'vail', url: 'https://www.stevenspass.com/the-mountain/mountain-conditions/lift-and-terrain-status.aspx' },
-  'whistler-blackcomb': { type: 'vail', url: 'https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/terrain-and-lift-status.aspx' },
+  // Whistler's feed only lists lifts that are running; the resort says it has 36 lifts in total.
+  'whistler-blackcomb': { type: 'vail', totalLifts: 36, url: 'https://www.whistlerblackcomb.com/the-mountain/mountain-conditions/terrain-and-lift-status.aspx' },
 };
 
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
@@ -92,7 +93,9 @@ export default async function handler(req, res) {
     if (feed.type === 'mtnpowder') lifts = fromMtnpowder(JSON.parse(await get(`https://mtnpowder.com/feed/${feed.id}/lifts`, 'application/json')));
     else lifts = fromVailHtml(await get(feed.url, 'text/html'));
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
-    res.status(200).json({ found: true, id, url: feed.page || feed.url, ...summarize(lifts), source: 'resort lift-status feed', fetchedAt: new Date().toISOString() });
+    const sum = summarize(lifts);
+    if (feed.totalLifts && sum.total < feed.totalLifts) { sum.closed += feed.totalLifts - sum.total; sum.total = feed.totalLifts; }
+    res.status(200).json({ found: true, id, url: feed.page || feed.url, ...sum, source: 'resort lift-status feed', fetchedAt: new Date().toISOString() });
   } catch (e) {
     res.status(req.query.debug ? 200 : 502).json({ error: e.message || String(e), url: feed.page || feed.url });
   }

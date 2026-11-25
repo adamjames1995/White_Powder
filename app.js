@@ -475,7 +475,7 @@ function renderResort(r) {
 
     <section id="sec-cams" class="dsec">
       <div class="dsec-h"><h2>Cams</h2><a href="${esc(camsLink(r))}" target="_blank" rel="noopener">${r.camsUrl ? 'Official cams' : 'Find cams'} ↗</a></div>
-      <div class="card flat"><div class="camrow" id="cams"><p class="small muted">Loading cams…</p></div></div>
+      <div class="card flat"><div class="camwrap" id="cams"><p class="small muted">Loading cams…</p></div></div>
     </section>
 
     <section id="sec-weather" class="dsec">
@@ -601,6 +601,9 @@ function loadObs(r) {
   return obsPending.get(r.id);
 }
 
+const CAM_AUTO_KEY = 'wp:cam-autoplay:v1';
+const camAutoplay = () => localStorage.getItem(CAM_AUTO_KEY) === '1';
+
 async function loadCams(r) {
   const el = () => document.getElementById('cams');
   let cams = camsCache.get(r.id);
@@ -610,15 +613,30 @@ async function loadCams(r) {
     camsCache.set(r.id, cams);
   }
   if (!el() || location.hash !== `#/resort/${r.id}`) return;
-  const live = (r.cams || []).map((c) => `<button class="cam embed" data-embed="${esc(c.embed)}" data-name="${esc(c.name)}"><div class="ph live"><span class="play">▶</span><span class="lv">LIVE</span></div><span>${esc(c.name)}</span></button>`).join('');
+  // Resort's own cams first, then nearby cams from Windy (all with preview images where available).
+  const all = [
+    ...(r.cams || []).map((c) => ({ name: c.name, embed: c.embed || null, link: c.link || null, preview: c.preview || null, live: true, src: 'resort' })),
+    ...cams.list.map((c) => ({ name: c.title, embed: c.embed || null, link: c.link, preview: c.image, live: !!c.live, src: 'windy' })),
+  ];
+  const tile = (c, i) => `<button class="cam embed" data-i="${i}">
+      <div class="ph live">${c.preview ? `<img src="${esc(c.preview)}${c.preview.includes('?') ? '&' : '?'}t=${Math.floor(Date.now() / 300000)}" alt="" loading="lazy" onerror="this.remove()" />` : ''}<span class="play">${c.embed ? '▶' : '↗'}</span>${c.live ? '<span class="lv">LIVE</span>' : '<span class="lv tl">TIME-LAPSE</span>'}</div>
+      <span>${esc(c.name)}</span>
+    </button>`;
   const official = `<a class="cam official" href="${esc(camsLink(r))}" target="_blank" rel="noopener"><div class="ph">📷</div><span>${r.camsUrl ? `All ${esc(r.name)} cams` : `Search ${esc(r.name)} webcams`} ↗</span></a>`;
-  el().innerHTML = live + cams.list.map((c) => `
-    <a class="cam" href="${esc(c.link)}" target="_blank" rel="noopener">
-      <img src="${esc(c.image)}" alt="${esc(c.title)}" loading="lazy" />
-      <span>${esc(c.title)}</span>
-    </a>`).join('') + official;
-  el().querySelectorAll('[data-embed]').forEach((b) => b.addEventListener('click', () => openCam(b.dataset.name, b.dataset.embed, r)));
-  if (cams.list.length) el().insertAdjacentHTML('afterend', `<p class="small muted" style="margin:6px 0 0">Webcam images via <a href="https://www.windy.com/webcams" target="_blank" rel="noopener">windy.com</a></p>`);
+  const first = all.findIndex((c) => c.embed);
+  const auto = camAutoplay() && first >= 0;
+  el().innerHTML = `
+    ${auto ? `<div class="cam-feature"><div class="cam-frame"><iframe id="cam-live" src="${esc(all[first].embed)}" title="${esc(all[first].name)} webcam" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe></div><div class="small muted cam-cap" id="cam-cap">${esc(all[first].name)} · auto-play is on (Alerts &amp; settings)</div></div>` : ''}
+    <div class="camrow-in">${all.map(tile).join('')}${official}</div>
+    ${!all.length ? '<p class="small muted">No cams found for this mountain yet — try the link above.</p>' : ''}
+    ${cams.list.length ? '<p class="small muted" style="margin:6px 0 0">Nearby cams via <a href="https://www.windy.com/webcams" target="_blank" rel="noopener">windy.com</a></p>' : ''}`;
+  el().querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', () => {
+    const c = all[Number(b.dataset.i)];
+    if (!c.embed) { window.open(c.link, '_blank', 'noopener'); return; }
+    const live = document.getElementById('cam-live');
+    if (live) { live.src = c.embed; document.getElementById('cam-cap').textContent = c.name; live.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    else openCam(c.name, c.embed, r);
+  }));
 }
 
 function dayTable(sd, bd) {
@@ -1258,11 +1276,11 @@ async function waitFor(sel, ms = 12000) {
 }
 const tourResort = () => (shownList().list[0] || RESORTS[0])?.id;
 const TOUR = [
-  { sel: '.levelbar', title: 'Summit, Mid or Base', text: 'Switch every forecast to that elevation. Warm storms can be rain at the base and powder up top.' },
+  { sel: '.levelbar', title: 'Summit, Mid or Base', text: 'Switch every forecast to that elevation. Warm storms can be rain at the base and powder up top.', tryit: 'Pick your favorite now — tap Summit, Mid or Base.' },
   { sel: '.card.rc .mstatus', title: 'Open or closed', text: 'Live from the resort\'s lift feed. The green circle fills with the share of lifts running; closed resorts show their expected opening date.' },
-  { sel: '.card.rc .scroller', title: 'Snow for the next 10 days', text: 'White bars are snow, blue is a rain/snow mix. Swipe left for the past week, right for days 11–15. Last 24h is measured at the nearest snow station.' },
-  { sel: '.card.rc .star', title: 'Favorites', text: 'Tap the star to keep a mountain in your ★ Favorites list.' },
-  { sel: '.homebar', title: 'Your list', text: 'Flip between Favorites and All. Edit adds any resort in the world (or near a ZIP code), reorders or removes mountains.' },
+  { sel: '.card.rc .scroller', title: 'Snow for the next 10 days', text: 'White bars are snow, blue is a rain/snow mix. Swipe left for the past week, right for days 11–15. Last 24h is measured at the nearest snow station.', tryit: 'Try it — swipe the bars sideways.' },
+  { sel: '.card.rc .star', title: 'Favorites', text: 'Tap the star to keep a mountain in your ★ Favorites list.', tryit: 'Tap it to try — tap again to undo.' },
+  { sel: '.homebar .seg-ctl', title: 'Favorites or All', text: 'Flip between your starred mountains and everything on your list. The Edit button next to it adds any resort in the world (or near a ZIP code), reorders or removes mountains.', tryit: 'Tap Favorites or All.' },
   { sel: '.top-actions a[href="#/settings"]', title: 'Powder alerts', text: 'Get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).' },
   { route: () => `#/resort/${tourResort()}`, sel: '#tabs', title: 'Tap any mountain', text: 'Its page has everything: snow summary, live cams, weather, trail map, food and the snow report. Tap a tab to jump there.' },
   { route: () => `#/resort/${tourResort()}`, sel: '.ddlinks', title: 'Day-by-day & hourly', text: 'Open the detailed Day/Night forecast or the hourly view. You can also tap any day in the bars above.' },
@@ -1276,21 +1294,27 @@ function startTour(intro = '') {
   let i = 0, cur = null, alive = true;
   const ov = document.createElement('div');
   ov.className = 'tour';
-  ov.innerHTML = '<div class="tour-hole"></div><div class="tour-tip" role="dialog" aria-live="polite"></div>';
+  ov.innerHTML = '<div class="tour-block"></div><div class="tour-hole"></div><div class="tour-tip" role="dialog" aria-live="polite"></div>';
   document.body.appendChild(ov);
-  const hole = ov.querySelector('.tour-hole'), tip = ov.querySelector('.tour-tip');
+  const hole = ov.querySelector('.tour-hole'), tip = ov.querySelector('.tour-tip'), block = ov.querySelector('.tour-block');
+  // During the tour, links don't navigate (so taps on the highlighted controls can't leave the tour).
+  const noNav = (e) => { const a = e.target.closest?.('a'); if (a && !tip.contains(a)) e.preventDefault(); };
+  document.addEventListener('click', noNav, true);
   let curSel = null;
   const place = () => {
     if (!cur) return;
     if (!cur.isConnected && curSel) { cur = document.querySelector(curSel); if (!cur) return; } // page re-rendered
     const b = cur.getBoundingClientRect(), pad = 6;
-    Object.assign(hole.style, { top: `${b.top - pad}px`, left: `${b.left - pad}px`, width: `${b.width + pad * 2}px`, height: `${b.height + pad * 2}px` });
+    const L = b.left - pad, T = b.top - pad, W = b.width + pad * 2, H = b.height + pad * 2;
+    Object.assign(hole.style, { top: `${T}px`, left: `${L}px`, width: `${W}px`, height: `${H}px` });
+    // block taps everywhere except inside the spotlight
+    block.style.clipPath = `path(evenodd, 'M0 0H${innerWidth}V${innerHeight}H0Z M${L} ${T}h${W}v${H}h-${W}Z')`;
     const below = b.bottom + 14, th = tip.offsetHeight || 170;
     const top = below + th < innerHeight - 10 ? below : Math.max(10, b.top - th - 14);
     tip.style.top = `${top}px`;
   };
   const finish = () => {
-    alive = false; ov.remove();
+    alive = false; ov.remove(); document.removeEventListener('click', noNav, true);
     removeEventListener('resize', place); removeEventListener('scroll', place, true);
     try { localStorage.setItem(ONBOARD_KEY, '1'); } catch {}
     if (location.hash.startsWith('#/resort/')) location.hash = '#/';
@@ -1311,6 +1335,7 @@ function startTour(intro = '') {
       <div class="tour-step">${i + 1} of ${TOUR.length}</div>
       <h3>${st.title}</h3>
       <p>${st.text}</p>
+      ${st.tryit ? `<p class="tryit">👆 ${st.tryit}</p>` : ''}
       <div class="tut-btns">
         <button class="btn" id="tour-skip">${i ? 'Back' : 'Skip tour'}</button>
         <button class="btn primary" id="tour-next">${i === TOUR.length - 1 ? 'Done' : 'Next'}</button>
@@ -1392,7 +1417,7 @@ async function renderSettings() {
 
   app.innerHTML = `
     <a class="back" href="#/">‹ All resorts</a>
-    <h1 class="title">Powder alerts</h1>
+    <h1 class="title">Alerts &amp; settings</h1>
     <section class="section stack">
       <h3>When to alert</h3>
       <label>Notify me when a resort's summit forecast hits
@@ -1402,6 +1427,11 @@ async function renderSettings() {
       </label>
       <div>${RESORTS.map((r) => `<label class="opt"><input type="checkbox" value="${r.id}" ${prefs.resorts.includes(r.id) ? 'checked' : ''}/> ${esc(r.name)}</label>`).join('')}</div>
       <p class="small muted">Each storm alerts once per resort per day. Checks run twice daily (about 6 am and 6 pm Pacific).</p>
+    </section>
+    <section class="section stack">
+      <h3>Webcams</h3>
+      <label class="opt"><input type="checkbox" id="cam-auto" ${camAutoplay() ? 'checked' : ''}/> Auto-play the first cam when I open a mountain</label>
+      <p class="small muted">Off by default: live video uses more data and can slow things down. When off, tap any cam preview to play it.</p>
     </section>
     <section class="section stack" id="push-box">
       ${!pushOK ? `<div class="note">${standalone ? 'This device doesn\'t support web push.' : 'On iPhone: tap Share → <b>Add to Home Screen</b>, then open White Powder from your home screen to turn on alerts.'}</div>` : ''}
@@ -1415,14 +1445,15 @@ async function renderSettings() {
   const readPrefs = () => ({
     threshold: +document.getElementById('thr').value,
     withinDays: +document.getElementById('win').value,
-    resorts: [...app.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.value),
+    resorts: [...app.querySelectorAll('input[type=checkbox][value]:not(#cam-auto):checked')].map((c) => c.value),
   });
   const save = async () => {
     const p = readPrefs(); setPrefs(p);
     const s = pushOK ? await currentSub().catch(() => null) : null;
     if (s) { try { await postSub({ action: 'save', subscription: s.toJSON(), prefs: p }); msg('Saved.'); } catch (e) { msg(`Couldn't save to server: ${e.message}`, true); } }
   };
-  app.querySelectorAll('select, input[type=checkbox]').forEach((el) => el.addEventListener('change', save));
+  app.querySelectorAll('select, input[type=checkbox]:not(#cam-auto)').forEach((el) => el.addEventListener('change', save));
+  document.getElementById('cam-auto')?.addEventListener('change', (e) => { try { localStorage.setItem(CAM_AUTO_KEY, e.target.checked ? '1' : '0'); } catch {} msg(e.target.checked ? 'Cams will auto-play.' : 'Cams will wait for a tap.'); });
 
   document.getElementById('enable')?.addEventListener('click', async (e) => {
     e.target.disabled = true;

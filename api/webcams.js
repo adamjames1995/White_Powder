@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   const lat = Number(req.query.lat), lon = Number(req.query.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return res.status(400).json({ error: 'lat/lon required' });
   const radiusKm = Math.min(50, Number(req.query.radius) || 15);
-  const url = `https://api.windy.com/webcams/api/v3/webcams?nearby=${lat},${lon},${radiusKm}&include=images,urls&limit=12`;
+  const url = `https://api.windy.com/webcams/api/v3/webcams?nearby=${lat},${lon},${radiusKm}&include=images,urls,player&limit=12`;
   try {
     const r = await fetch(url, { headers: { 'x-windy-api-key': key } });
     if (!r.ok) throw new Error(`Windy ${r.status}`);
@@ -17,6 +17,9 @@ export default async function handler(req, res) {
         title: c.title,
         image: c.images?.current?.preview || c.images?.daylight?.preview,
         link: c.urls?.detail || `https://www.windy.com/webcams/${c.webcamId}`,
+        // Windy's embeddable player: live stream when the camera has one, otherwise today's time-lapse
+        embed: (typeof c.player?.live === 'string' && c.player.live) || (typeof c.player?.day === 'string' && c.player.day) || c.player?.live?.embed || c.player?.day?.embed || null,
+        live: !!(c.player?.live && (typeof c.player.live === 'string' || c.player.live.available)),
       }))
       .filter((c) => c.image);
     res.setHeader('Cache-Control', 's-maxage=300');

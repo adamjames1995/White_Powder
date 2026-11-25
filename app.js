@@ -704,7 +704,7 @@ function renderResort(r) {
     <div class="dhead">
       <a class="circ" href="#/" aria-label="Back">‹</a>
       <div class="pillbar">
-        <a href="#/settings" aria-label="Powder alerts">🔔</a>
+        <a href="#/settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></a>
         <button id="share" aria-label="Share">⤴</button>
       </div>
     </div>
@@ -1299,60 +1299,95 @@ function applyOrder(ids) {
 }
 
 let sortActive = false;
+// Press-and-hold (or grab a handle) to drag. The dragged item follows the finger; the others slide
+// out of the way with a transition; on release it glides into its slot and only then is the DOM reordered.
 function sortable(list, itemSel, { handle, longPress = 0, onDrop }) {
   if (!list || list.dataset.sortable) return;
   list.dataset.sortable = '1';
-  let item = null, timer = null, startX = 0, startY = 0, grabY = 0, raf = 0, lastY = 0, moved = false;
+  let item = null, timer = null, startX = 0, startY = 0, lastY = 0, raf = 0;
+  let snap = null; // { els, tops, bottoms, idx0, target, startPageY, dh }
   const items = () => [...list.querySelectorAll(itemSel)];
-  const blockTouch = (e) => { if (sortActive) e.preventDefault(); };
-  document.addEventListener('touchmove', blockTouch, { passive: false });
+  document.addEventListener('touchmove', (e) => { if (sortActive) e.preventDefault(); }, { passive: false });
+  const EASE = 'transform .22s cubic-bezier(.2,.8,.2,1)';
 
   const begin = () => {
-    sortActive = true; moved = false;
-    item.classList.add('dragging');
-    list.classList.add('sorting');
-    grabY = lastY - item.getBoundingClientRect().top;
-    if (navigator.vibrate) navigator.vibrate(15);
-    const loop = () => { // auto-scroll near the screen edges
+    sortActive = true;
+    const els = items();
+    const rects = els.map((el) => el.getBoundingClientRect());
+    const idx0 = els.indexOf(item);
+    const next = rects[idx0 + 1] || null, prev = rects[idx0 - 1] || null;
+    const gap = next ? next.top - rects[idx0].bottom : prev ? rects[idx0].top - prev.bottom : 8;
+    snap = { els, tops: rects.map((r) => r.top + scrollY), bottoms: rects.map((r) => r.bottom + scrollY), idx0, target: idx0, startPageY: lastY + scrollY, dh: rects[idx0].height + gap };
+    els.forEach((el) => { if (el !== item) el.style.transition = EASE; });
+    item.style.transition = 'box-shadow .15s';
+    item.classList.add('dragging'); list.classList.add('sorting');
+    if (navigator.vibrate) navigator.vibrate(12);
+    const loop = () => {
       if (!sortActive) return;
-      const edge = 90;
-      if (lastY < edge) window.scrollBy(0, -10); else if (lastY > innerHeight - edge) window.scrollBy(0, 10);
-      place(); raf = requestAnimationFrame(loop);
+      const edge = 80;
+      if (lastY < edge) window.scrollBy(0, -Math.ceil((edge - lastY) / 8));
+      else if (lastY > innerHeight - edge) window.scrollBy(0, Math.ceil((lastY - innerHeight + edge) / 8));
+      place();
+      raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
   };
   const place = () => {
-    if (!item) return;
-    // move the element in the list when the finger passes a neighbour's midpoint
-    for (const o of items()) {
-      if (o === item) continue;
-      const b = o.getBoundingClientRect(), mid = b.top + b.height / 2;
-      const ib = item.getBoundingClientRect();
-      if (lastY - grabY + ib.height / 2 < mid && o.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING) { list.insertBefore(item, o); moved = true; break; }
-      if (lastY - grabY + ib.height / 2 > mid && o.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_PRECEDING) { list.insertBefore(item, o.nextSibling); moved = true; }
-    }
-    const top = item.getBoundingClientRect().top - (parseFloat(item.style.getPropertyValue('--dy')) || 0);
-    item.style.setProperty('--dy', `${lastY - grabY - top}px`);
+    if (!snap) return;
+    const { els, tops, bottoms, idx0, dh } = snap;
+    const dy = lastY + scrollY - snap.startPageY;
+    item.style.transform = `translateY(${dy}px) scale(1.02)`;
+    const center = (tops[idx0] + bottoms[idx0]) / 2 + dy;
+    let target = 0;
+    els.forEach((el, i) => { if (i !== idx0 && (tops[i] + bottoms[i]) / 2 < center) target++; });
+    snap.target = target;
+    els.forEach((el, i) => {
+      if (i === idx0) return;
+      const shift = i > idx0 && i <= target ? -dh : i < idx0 && i >= target ? dh : 0;
+      const t = shift ? `translateY(${shift}px)` : '';
+      if (el.style.transform !== t) el.style.transform = t;
+    });
+  };
+  const finish = () => {
+    const { els, tops, bottoms, idx0, target } = snap;
+    const finalTop = target > idx0 ? bottoms[target] - (bottoms[idx0] - tops[idx0]) : target < idx0 ? tops[target] : tops[idx0];
+    item.style.transition = EASE;
+    item.style.transform = `translateY(${finalTop - tops[idx0]}px)`;
+    const el = item;
+    setTimeout(() => {
+      // commit the new order, then drop all transforms without animating
+      const order = els.filter((x) => x !== el);
+      order.splice(target, 0, el);
+      els.forEach((x) => { x.style.transition = 'none'; x.style.transform = ''; });
+      // re-insert in the new order right where the block was
+      const marker = document.createComment('s');
+      list.insertBefore(marker, els[0]);
+      order.forEach((x) => list.insertBefore(x, marker));
+      marker.remove();
+      void list.offsetHeight;
+      els.forEach((x) => { x.style.transition = ''; });
+      el.classList.remove('dragging'); list.classList.remove('sorting');
+      sortActive = false;
+      if (target !== idx0) onDrop(order.map((x) => x.dataset.id));
+    }, 230);
   };
   const end = () => {
     clearTimeout(timer); timer = null;
     if (!item) return;
     cancelAnimationFrame(raf);
-    const was = sortActive;
-    item.classList.remove('dragging'); item.style.removeProperty('--dy'); list.classList.remove('sorting');
-    item = null; sortActive = false;
+    const was = sortActive && snap;
     if (was) {
-      // swallow the click that follows the drop so the card doesn't open
       const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
       document.addEventListener('click', stop, { capture: true, once: true });
-      setTimeout(() => document.removeEventListener('click', stop, true), 400);
-      if (moved) onDrop(items().map((el) => el.dataset.id));
+      setTimeout(() => document.removeEventListener('click', stop, true), 450);
+      finish();
     }
+    item = null; snap = was ? snap : null;
   };
   list.addEventListener('pointerdown', (e) => {
+    if (sortActive) return;
     const it = e.target.closest(itemSel);
     if (!it || !list.contains(it) || (handle && !e.target.closest(handle))) return;
-    if (e.target.closest('[data-strip]') && !handle) { /* allow long-press on the strip too */ }
     item = it; startX = e.clientX; startY = lastY = e.clientY;
     if (longPress) timer = setTimeout(() => { timer = null; begin(); }, longPress);
     else { e.preventDefault(); begin(); }
@@ -1587,7 +1622,7 @@ const TUTORIAL = [
   ['⛰️', 'Summit, Mid or Base', 'The toggle at the top switches every forecast to that elevation — warm storms can be rain at the base and powder up top.'],
   ['📋', 'Tap a mountain for more', 'Detailed day/night and hourly forecasts, live webcams, the trail map, slopeside and in-town food, and the snow report.'],
   ['⭐', 'Favorites & more mountains', 'Tap ☆ to favorite. Use + to add any resort in the world or remove mountains. Press and hold a card to drag it into a new order.'],
-  ['🔔', 'Powder alerts', 'Tap the bell to get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).'],
+  ['⚙️', 'Settings & powder alerts', 'Tap the gear to switch light/dark mode or get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).'],
 ];
 
 function showTutorial(intro = '') { return startTour(intro); }
@@ -1769,11 +1804,19 @@ async function renderSettings() {
   const pushOK = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   const sub = pushOK ? await currentSub().catch(() => null) : null;
 
+  const theme = localStorage.getItem('wp:theme:v1') || 'dark';
   app.innerHTML = `
-    <a class="back" href="#/">‹ All resorts</a>
-    <h1 class="title">Alerts &amp; settings</h1>
+    <a class="back" href="#/">‹ Back</a>
+    <h1 class="title">Settings</h1>
     <section class="section stack">
-      <h3>When to alert</h3>
+      <h3>Appearance</h3>
+      <div class="seg-ctl theme-ctl" role="radiogroup" aria-label="Appearance">
+        ${[['system', 'Match iPhone'], ['light', 'Light'], ['dark', 'Dark'], ['time', 'Time of day']].map(([k, v]) => `<button data-theme-opt="${k}" class="${theme === k ? 'on' : ''}" role="radio" aria-checked="${theme === k}">${v}</button>`).join('')}
+      </div>
+      <p class="small muted">${theme === 'system' ? 'Follows your iPhone\'s Light/Dark setting.' : theme === 'time' ? 'Light from 7 AM to 6 PM, dark the rest of the time.' : ''}</p>
+    </section>
+    <section class="section stack">
+      <h3>Powder alerts · when to alert</h3>
       <label>Notify me when a resort's summit forecast hits
         <select id="thr">${[3, 4, 6, 8, 10, 12, 18, 24].map((v) => `<option value="${v}" ${v === prefs.threshold ? 'selected' : ''}>${v}"</option>`).join('')}</select>
         in a single day, within the next
@@ -1807,6 +1850,10 @@ async function renderSettings() {
     if (s) { try { await postSub({ action: 'save', subscription: s.toJSON(), prefs: p }); msg('Saved.'); } catch (e) { msg(`Couldn't save to server: ${e.message}`, true); } }
   };
   app.querySelectorAll('select, input[type=checkbox]:not(#cam-auto)').forEach((el) => el.addEventListener('change', save));
+  app.querySelectorAll('[data-theme-opt]').forEach((b) => b.addEventListener('click', () => {
+    try { localStorage.setItem('wp:theme:v1', b.dataset.themeOpt); } catch {}
+    window.wpTheme?.(); renderSettings();
+  }));
   document.getElementById('cam-auto')?.addEventListener('change', (e) => { try { localStorage.setItem(CAM_AUTO_KEY, e.target.checked ? '1' : '0'); } catch {} msg(e.target.checked ? 'Cams will auto-play.' : 'Cams will wait for a tap.'); });
 
   document.getElementById('enable')?.addEventListener('click', async (e) => {
@@ -2030,6 +2077,11 @@ async function hardRefresh() {
     }
   }, { passive: true });
 })();
+
+// ---------- theme follows iOS / the clock while the app is open ----------
+window.matchMedia?.('(prefers-color-scheme: light)').addEventListener?.('change', () => window.wpTheme?.());
+setInterval(() => window.wpTheme?.(), 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') window.wpTheme?.(); });
 
 // ---------- boot ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

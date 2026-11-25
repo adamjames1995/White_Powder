@@ -615,7 +615,7 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 
 /* drag to reorder */
 .card.rc, .mrow { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
-.dragging { position: relative; z-index: 50; transform: translateY(var(--dy, 0)) scale(1.02); box-shadow: 0 12px 28px rgba(0,0,0,.55); transition: box-shadow .15s, scale .15s; }
+.dragging { position: relative; z-index: 50; box-shadow: 0 14px 30px rgba(0,0,0,.55); }
 .card.rc.dragging { outline: 2px solid var(--accent); }
 .mrow.dragging { background: var(--surface-1); border-radius: 10px; }
 .grip { cursor: grab; touch-action: none; color: var(--text-muted); font-size: 18px; padding: 6px 4px; }
@@ -689,3 +689,31 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 .passchip.epic { padding: 2px 5px; }
 .passchip.epic .epicword { height: 11px; width: auto; display: block; }
 .seg-ctl.views .pass-epic.on .epicword { height: 15px; width: auto; display: block; }
+
+.sorting > .swc:not(.dragging), .sorting > .mrow:not(.dragging) { will-change: transform; }
+
+/* ---------- light theme ---------- */
+html[data-theme="light"] {
+  color-scheme: light;
+  --surface-0: #f3f4f6; --surface-1: #ffffff; --surface-2: #e9ecf0; --border: #dde1e7; --grid: #dde1e7;
+  --text-primary: #15181d; --text-secondary: #3f4650; --text-muted: #6b7280;
+  --snow: #9fb2c9; --zero: #c5ccd5; --summit: #6f86a3; --base: #9aa3ae;
+}
+/* top bar stays dark in both themes (keeps the logo and iPhone status bar readable) */
+html[data-theme="light"] .topbar { background: #121211; border-bottom-color: #2f2f2c; }
+html[data-theme="light"] .topbar .icon-btn { background: #1a1a19; border-color: #2f2f2c; color: #f0efec; }
+html[data-theme="light"] .strip .bar:not(.zero) { background: linear-gradient(to top, #8ea3bd, #b9c8da); box-shadow: inset 0 1px 0 rgba(255,255,255,.6), 0 0 0 .5px rgba(60,80,110,.35); }
+html[data-theme="light"] .flakes i { background: #8fa6c2; }
+html[data-theme="light"] .dd-v.hlv, html[data-theme="light"] td.hl { color: var(--text-primary); }
+html[data-theme="light"] .hit:hover, html[data-theme="light"] .hit.active { fill: rgba(0,0,0,.05); }
+html[data-theme="light"] .snow-now.light { background: rgba(0,0,0,.05); }
+html[data-theme="light"] .minimap, html[data-theme="light"] .fullmap, html[data-theme="light"] .skimap { background: #e5e7eb; }
+html[data-theme="light"] .l24 { box-shadow: none; }
+html[data-theme="light"] .modal { background: rgba(15,20,30,.45); }
+html[data-theme="light"] .card { box-shadow: 0 1px 2px rgba(15,20,30,.05); }
+.theme-ctl { flex-wrap: wrap; }
+.theme-ctl button { flex: 1; }
+.icon-btn svg { display: block; }
+html[data-theme="light"] .snow-now { color: #1d4f91; border-color: rgba(57,135,229,.45); background: rgba(57,135,229,.12); }
+html[data-theme="light"] .snow-now.heavy { background: rgba(57,135,229,.22); }
+html[data-theme="light"] .snow-now.blizzard { color: #9b1c1f; background: rgba(229,72,77,.15); border-color: rgba(229,72,77,.45); }

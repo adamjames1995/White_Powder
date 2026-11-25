@@ -656,3 +656,13 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 .swc.removing { opacity: 0; transform: translateX(-40px); }
 .swc.dragging { overflow: visible; }
 .swc.dragging > .card { outline: 2px solid var(--accent); }
+
+/* pass colours: Epic orange, Ikon yellow, each with the pass site's own icon */
+.passchip { display: inline-flex; align-items: center; gap: 3px; }
+.passchip.epic { background: #f26b1d; color: #fff; }
+.passchip.ikon { background: #ffd200; color: #111; }
+.passico { width: 12px; height: 12px; border-radius: 2px; flex: none; }
+.seg-ctl.views button { display: inline-flex; align-items: center; gap: 4px; }
+.seg-ctl.views button .passico { width: 14px; height: 14px; }
+.seg-ctl.views .pass-epic.on { background: #f26b1d; color: #fff; }
+.seg-ctl.views .pass-ikon.on { background: #ffd200; color: #111; }

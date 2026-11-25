@@ -73,9 +73,10 @@ async function refresh(force = false) {
   refreshBtn.classList.add('spin');
   try {
     stage('requesting forecast');
-    const data = await loadAll([...RESORTS, ...EXTRA.filter((m) => !m.placeholder)]);
+    const data = await loadAll(RESORTS);
     stage('drawing');
     state = { data, fetchedAt: Date.now(), error: null };
+    queueLoad(EXTRA);
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, fetchedAt: state.fetchedAt })); } catch {}
   } catch (e) {
     stage('failed');
@@ -96,6 +97,47 @@ async function loadAll(list) {
   results.forEach((r) => { if (r.status === 'fulfilled') Object.assign(data, r.value); else err = r.reason; });
   if (!Object.keys(data).length && err) throw err;
   return data;
+}
+
+// ---------- forecast queue: small batches, one at a time, with retries ----------
+// Open-Meteo's free tier rate-limits big parallel multi-model requests (HTTP 429), which left
+// pass-view cards stuck on "Loading forecast…". Batches of 4 run one after another and failures back off and retry.
+const loadQ = { ids: new Set(), running: false, fails: new Map() };
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+let rerenderTimer = 0;
+function rerenderHomeSoon() {
+  clearTimeout(rerenderTimer);
+  rerenderTimer = setTimeout(() => {
+    if (location.hash.length > 2) return;
+    if (sortActive || SX.anim || document.querySelector('.swc.open')) { rerenderHomeSoon(); return; }
+    renderHome();
+  }, 350);
+}
+function queueLoad(list) {
+  for (const r of list) if (r && !r.placeholder && !state.data?.[r.id] && (loadQ.fails.get(r.id) || 0) < 4) loadQ.ids.add(r.id);
+  runQueue();
+}
+async function runQueue() {
+  if (loadQ.running) return;
+  loadQ.running = true;
+  while (loadQ.ids.size) {
+    const rs = [...loadQ.ids].slice(0, 4).map(byId).filter((r) => r && !r.placeholder);
+    [...loadQ.ids].slice(0, 4).forEach((id) => loadQ.ids.delete(id));
+    if (!rs.length) continue;
+    try {
+      const d = await loadResorts(rs, { onStage: stage });
+      state.data = { ...(state.data || {}), ...d };
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data: state.data, fetchedAt: state.fetchedAt || Date.now() })); } catch {}
+      rerenderHomeSoon();
+      await sleep(400);
+    } catch (e) {
+      let n = 0;
+      rs.forEach((r) => { n = (loadQ.fails.get(r.id) || 0) + 1; loadQ.fails.set(r.id, n); if (n < 4) loadQ.ids.add(r.id); });
+      await sleep(/429|limit|too many/i.test(String(e?.message)) ? 15000 * n : 2500 * n);
+      if (n >= 4) rerenderHomeSoon();
+    }
+  }
+  loadQ.running = false;
 }
 
 /** Load one newly added mountain and merge it in. */
@@ -185,12 +227,7 @@ function ensurePass(pass) {
   (async () => {
     const pending = EXTRA.filter((m) => m.pass === pass && m.placeholder);
     const show = () => { if (location.hash.length <= 2 && localStorage.getItem(VIEW_KEY) === pass && !sortActive && !SX.anim) renderHome(); };
-    const loadData = async () => {
-      const need = EXTRA.filter((m) => m.pass === pass && !m.placeholder && !state.data?.[m.id]);
-      if (!need.length) return;
-      const d = await loadAll(need).catch(() => ({}));
-      state.data = { ...(state.data || {}), ...d };
-    };
+    const loadData = async () => queueLoad(EXTRA.filter((m) => m.pass === pass && !m.placeholder));
     await loadData(); // mountains measured on an earlier visit
     show();
     for (let i = 0; i < pending.length; i += 8) {
@@ -332,7 +369,9 @@ function removeMountain(id) {
   FAVS.delete(id); saveFavorites(FAVS);
   const p = getPrefs(); p.resorts = p.resorts.filter((x) => x !== id); setPrefs(p); syncSub();
 }
-const passChip = (r) => { const p = passOf(r); return p ? ` <span class="passchip ${p}">${PASSES[p]}</span>` : ''; };
+const PASS_ICON = { epic: 'https://www.google.com/s2/favicons?domain=epicpass.com&sz=64', ikon: 'https://www.google.com/s2/favicons?domain=ikonpass.com&sz=64' };
+const passMark = (p) => `<img class="passico" src="${PASS_ICON[p]}" alt="" onerror="this.remove()" />`;
+const passChip = (r) => { const p = passOf(r); return p ? ` <span class="passchip ${p}">${passMark(p)}${PASSES[p]}</span>` : ''; };
 function driveChip(r) {
   const k = getSort();
   if (k !== 'drive' && k !== 'best') return '';
@@ -354,7 +393,7 @@ function renderHome() {
     const s = state.data[r.id]?.[getLevel()];
     const star = `<button class="star ${FAVS.has(r.id) ? 'on' : ''}" data-star="${r.id}" aria-label="${FAVS.has(r.id) ? 'Remove from' : 'Add to'} favorites">${FAVS.has(r.id) ? '★' : '☆'}</button>`;
     if (!s) {
-      return `<div class="swc" data-id="${r.id}">${delBtn(r)}<div class="card rc"><div class="rc-head">${badge(r)}<div class="rc-title"><h2>${esc(r.name)}${passChip(r)}</h2><div class="sub">${esc(r.state || r.country || '')} · Loading forecast…</div></div>${star}</div></div></div>`;
+      return `<div class="swc" data-id="${r.id}">${delBtn(r)}<div class="card rc"><div class="rc-head">${badge(r)}<div class="rc-title"><h2>${esc(r.name)}${passChip(r)}</h2><div class="sub">${esc(r.state || r.country || '')} · ${(loadQ.fails.get(r.id) || 0) >= 4 ? 'Forecast unavailable right now — pull down to retry' : 'Loading forecast…'}</div></div>${star}</div></div></div>`;
     }
     const pd = prefs.resorts.includes(r.id) ? powderDay(s.days, prefs) : null;
     const wx = weatherNow(s);
@@ -388,8 +427,8 @@ function renderHome() {
       <div class="seg-ctl views" role="tablist">
         <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favs</button>
         <button data-view="all" class="${view === 'all' ? 'on' : ''}">All</button>
-        <button data-view="epic" class="pass-epic ${view === 'epic' ? 'on' : ''}">Epic</button>
-        <button data-view="ikon" class="pass-ikon ${view === 'ikon' ? 'on' : ''}">Ikon</button>
+        <button data-view="epic" class="pass-epic ${view === 'epic' ? 'on' : ''}">${passMark('epic')}Epic</button>
+        <button data-view="ikon" class="pass-ikon ${view === 'ikon' ? 'on' : ''}">${passMark('ikon')}Ikon</button>
       </div>
       <a class="addbtn" href="#/manage" aria-label="Add or remove mountains" title="Add or remove mountains">+</a>
     </div>
@@ -443,7 +482,7 @@ function renderHome() {
     const el = document.getElementById(`status-${r.id}`);
     if (el) el.innerHTML = statusLine(r);
   }));
-  list.filter((r) => !r.extra && !state.data[r.id]?.[getLevel()]).forEach((r) => loadOne(r).then(() => location.hash.length <= 2 && renderHome()));
+  queueLoad(list.filter((r) => !state.data[r.id]?.[getLevel()]));
 }
 
 /** What's falling right now, and how hard (inches of snow per hour; blizzard = heavy snow + strong gusts). */
@@ -1568,7 +1607,6 @@ function showTutorialCards(intro = '') {
 }
 
 // ---------- guided tour: spotlights the real app, step by step ----------
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(sel, ms = 12000) {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
@@ -1946,7 +1984,7 @@ window.addEventListener('resize', applyX);
 
 // ---------- pull down to refresh (iOS home-screen apps have no built-in one) ----------
 async function hardRefresh() {
-  statusCache.clear(); snotelCache.clear(); obsPending.clear(); camsCache.clear(); modelDepth.clear();
+  statusCache.clear(); snotelCache.clear(); obsPending.clear(); camsCache.clear(); modelDepth.clear(); loadQ.fails.clear();
   await refresh(true);
 }
 (() => {

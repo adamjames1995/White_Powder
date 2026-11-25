@@ -678,3 +678,8 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 .rc-title .sub .drive { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
 /* Epic's icon is orange; on the orange chip/tab show it white so it stands out */
 .passchip.epic .passico, .seg-ctl.views .pass-epic.on .passico { filter: brightness(0) invert(1); }
+
+/* Ikon: navy IKON wordmark on yellow, no white */
+.passchip.ikon { padding: 2px 5px; }
+.passchip.ikon .ikonword { height: 10px; width: auto; display: block; }
+.seg-ctl.views .pass-ikon.on .ikonword { height: 13px; width: auto; display: block; }

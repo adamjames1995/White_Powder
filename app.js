@@ -372,7 +372,8 @@ function removeMountain(id) {
 }
 const PASS_ICON = { epic: 'https://www.google.com/s2/favicons?domain=epicpass.com&sz=64', ikon: 'https://www.google.com/s2/favicons?domain=ikonpass.com&sz=64' };
 const passMark = (p) => `<img class="passico" src="${PASS_ICON[p]}" alt="" onerror="this.remove()" />`;
-const passChip = (r) => { const p = passOf(r); return p ? ` <span class="passchip ${p}">${passMark(p)}${PASSES[p]}</span>` : ''; };
+const IKON_WORD = '<img class="ikonword" src="/icons/ikon-word.png" alt="Ikon" />';
+const passChip = (r) => { const p = passOf(r); if (!p) return ''; return p === 'ikon' ? ` <span class="passchip ikon" title="Ikon Pass">${IKON_WORD}</span>` : ` <span class="passchip ${p}">${passMark(p)}${PASSES[p]}</span>`; };
 function driveChip(r) {
   const k = getSort();
   if (k !== 'drive' && k !== 'best') return '';
@@ -424,7 +425,7 @@ function renderHome() {
         <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favs</button>
         <button data-view="all" class="${view === 'all' ? 'on' : ''}">All</button>
         <button data-view="epic" class="pass-epic ${view === 'epic' ? 'on' : ''}">${passMark('epic')}Epic</button>
-        <button data-view="ikon" class="pass-ikon ${view === 'ikon' ? 'on' : ''}">${passMark('ikon')}Ikon</button>
+        <button data-view="ikon" class="pass-ikon ${view === 'ikon' ? 'on' : ''}" aria-label="Ikon">${view === 'ikon' ? IKON_WORD : 'Ikon'}</button>
       </div>
       <a class="addbtn" href="#/manage" aria-label="Add or remove mountains" title="Add or remove mountains">+</a>
     </div>

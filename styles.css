@@ -25,7 +25,7 @@ button { font: inherit; }
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; justify-content: space-between;
   padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
-  background: rgba(18,18,17,.92); backdrop-filter: blur(10px);
+  background: var(--surface-0);
   border-bottom: 1px solid var(--border);
 }
 .brand { display: flex; gap: 8px; align-items: center; font-weight: 700; font-size: 19px; color: var(--text-primary); text-decoration: none; }
@@ -382,3 +382,105 @@ details.fmore summary { cursor: pointer; color: var(--accent); padding: 10px 0; 
 .brand-mark { height: 28px; width: auto; display: block; }
 .brand-word { height: 22px; width: auto; display: block; }
 @media (max-width: 360px) { .brand-word { height: 18px; } .brand-mark { height: 24px; } }
+
+/* ---------- powder-trail bars (snow strips) ---------- */
+.strip .bar:not(.zero) {
+  position: relative;
+  border-radius: 10px 10px 3px 3px;
+  background:
+    radial-gradient(circle at 25% 30%, rgba(255,255,255,.95) 0 1px, transparent 1.6px) 0 0 / 6px 7px,
+    radial-gradient(circle at 70% 65%, rgba(205,220,240,.9) 0 .9px, transparent 1.5px) 2px 3px / 7px 6px,
+    radial-gradient(circle at 50% 50%, rgba(255,255,255,.7) 0 .7px, transparent 1.2px) 1px 1px / 4px 5px,
+    linear-gradient(to top, rgba(232,239,248,.98), rgba(242,245,249,.78) 70%, rgba(242,245,249,.45));
+  box-shadow: 0 0 6px rgba(225,236,252,.35);
+}
+/* a soft puff of spray on top of each column */
+.strip .bar:not(.zero)::before {
+  content: ''; position: absolute; left: -3px; right: -3px; top: -5px; height: 9px; border-radius: 50%;
+  background:
+    radial-gradient(circle at 20% 60%, rgba(255,255,255,.9) 0 1.2px, transparent 2px),
+    radial-gradient(circle at 55% 35%, rgba(255,255,255,.85) 0 1.4px, transparent 2.2px),
+    radial-gradient(circle at 85% 70%, rgba(220,232,248,.9) 0 1px, transparent 1.8px),
+    radial-gradient(ellipse at 50% 80%, rgba(242,245,249,.7), transparent 70%);
+  filter: blur(.3px);
+}
+.strip .bar.mixed:not(.zero) {
+  background:
+    radial-gradient(circle at 25% 30%, rgba(200,225,255,.95) 0 1px, transparent 1.6px) 0 0 / 6px 7px,
+    radial-gradient(circle at 70% 65%, rgba(255,255,255,.7) 0 .9px, transparent 1.5px) 2px 3px / 7px 6px,
+    linear-gradient(to top, rgba(57,135,229,.98), rgba(57,135,229,.7) 70%, rgba(57,135,229,.45));
+  box-shadow: 0 0 6px rgba(57,135,229,.35);
+}
+.strip .bar.mixed:not(.zero)::before {
+  background:
+    radial-gradient(circle at 25% 60%, rgba(160,200,250,.9) 0 1.2px, transparent 2px),
+    radial-gradient(circle at 60% 35%, rgba(255,255,255,.8) 0 1.2px, transparent 2px),
+    radial-gradient(ellipse at 50% 80%, rgba(57,135,229,.6), transparent 70%);
+}
+
+/* ---------- lifts-open pie ---------- */
+.spie { flex: none; width: 13px; height: 13px; border-radius: 50%; margin-right: 4px;
+  background: conic-gradient(#22c55e calc(var(--p) * 1%), rgba(34,197,94,.12) 0);
+  box-shadow: inset 0 0 0 1.5px #22c55e; }
+
+/* ---------- onboarding / tutorial ---------- */
+.modal.ob .modal-card { max-width: 380px; }
+.ob-form { margin-top: 12px; }
+.ob-form .search { text-align: center; font-size: 18px; letter-spacing: .04em; }
+.modal-card .ok { color: #3fc93f; margin-bottom: 6px; }
+.tut-icon { font-size: 44px; line-height: 1; margin: 6px 0 2px; }
+.tut-dots { display: flex; gap: 6px; justify-content: center; margin: 14px 0 12px; }
+.tut-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+.tut-dots i.on { background: var(--accent); width: 18px; border-radius: 4px; }
+.tut-btns { display: flex; gap: 10px; }
+.tut-btns .btn { flex: 1; }
+
+/* ---------- live cam tiles + player ---------- */
+button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: pointer; }
+.cam .ph.live { position: relative; aspect-ratio: 16/9; display: grid; place-items: center;
+  background: linear-gradient(160deg, #23385a, #0e1422); }
+.cam .ph.live .play { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.92); color: #0e1422; font-size: 15px; padding-left: 3px; }
+.cam .ph.live .lv { position: absolute; top: 6px; left: 6px; font-size: 10px; font-weight: 700; letter-spacing: .06em; color: #fff; background: #e5484d; border-radius: 4px; padding: 1px 5px; }
+.modal.cam-modal { padding: 10px; }
+.modal.cam-modal .modal-card { max-width: 760px; padding: 12px; text-align: left; }
+.cam-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.circ.sm { width: 34px; height: 34px; font-size: 16px; padding: 0; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); border-radius: 50%; cursor: pointer; }
+.cam-frame { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 10px; overflow: hidden; }
+.cam-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* ---------- crisp top bar on the Home Screen (no translucency/blur) ---------- */
+.topbar { -webkit-backdrop-filter: none; backdrop-filter: none; }
+.brand-mark, .brand-word { image-rendering: -webkit-optimize-contrast; }
+
+/* ---------- 'snowing now' card: subtle falling flakes ---------- */
+.card.rc { position: relative; overflow: hidden; }
+.card.rc.snowing { border-color: rgba(225,236,252,.35); }
+.flakes { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.flakes i { position: absolute; top: -8px; width: 4px; height: 4px; border-radius: 50%; background: #fff; opacity: 0;
+  animation: wp-fall linear infinite; }
+.flakes i:nth-child(odd) { width: 3px; height: 3px; }
+.flakes i:nth-child(3n) { width: 5px; height: 5px; filter: blur(.6px); }
+.flakes i:nth-child(1) { left: 3%; animation-duration: 6.0s; animation-delay: -0.0s; }
+.flakes i:nth-child(2) { left: 10%; animation-duration: 7.7s; animation-delay: -1.3s; }
+.flakes i:nth-child(3) { left: 17%; animation-duration: 9.4s; animation-delay: -2.6s; }
+.flakes i:nth-child(4) { left: 24%; animation-duration: 6.1s; animation-delay: -3.9s; }
+.flakes i:nth-child(5) { left: 31%; animation-duration: 7.8s; animation-delay: -5.2s; }
+.flakes i:nth-child(6) { left: 38%; animation-duration: 9.5s; animation-delay: -6.5s; }
+.flakes i:nth-child(7) { left: 45%; animation-duration: 6.2s; animation-delay: -0.8s; }
+.flakes i:nth-child(8) { left: 52%; animation-duration: 7.9s; animation-delay: -2.1s; }
+.flakes i:nth-child(9) { left: 59%; animation-duration: 9.6s; animation-delay: -3.4s; }
+.flakes i:nth-child(10) { left: 66%; animation-duration: 6.3s; animation-delay: -4.7s; }
+.flakes i:nth-child(11) { left: 73%; animation-duration: 8.0s; animation-delay: -6.0s; }
+.flakes i:nth-child(12) { left: 80%; animation-duration: 9.7s; animation-delay: -0.3s; }
+.flakes i:nth-child(13) { left: 87%; animation-duration: 6.4s; animation-delay: -1.6s; }
+.flakes i:nth-child(14) { left: 94%; animation-duration: 8.1s; animation-delay: -2.9s; }
+
+@keyframes wp-fall {
+  0% { transform: translate3d(0, -10px, 0); opacity: 0; }
+  10% { opacity: .55; }
+  90% { opacity: .4; }
+  100% { transform: translate3d(14px, 240px, 0); opacity: 0; }
+}
+.card.rc > :not(.flakes) { position: relative; z-index: 1; }
+.snow-now { font-size: 11px; vertical-align: 2px; margin-left: 4px; font-weight: 600; color: #e6eefb; background: rgba(57,135,229,.25); border: 1px solid rgba(160,200,250,.35); border-radius: 999px; padding: 1px 7px; }
+@media (prefers-reduced-motion: reduce) { .flakes { display: none; } }

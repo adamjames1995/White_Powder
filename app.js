@@ -1,8 +1,8 @@
-import { CATALOG, logoUrl } from '/lib/resorts.js';
+import { CATALOG, logoUrl, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS, midFt } from '/lib/snow.js';
 import { fetchDetail, compass } from '/lib/detail.js';
 import { foodQuery, fetchOverpass, buildFood } from '/lib/food.js';
-import { getMountains, saveMountains, getFavorites, saveFavorites, uniqueId, measureElevations, searchPlaces, nearestSnotel } from '/lib/store.js';
+import { getMountains, saveMountains, getFavorites, saveFavorites, uniqueId, measureElevations, searchPlaces, nearestSnotel, hasSavedMountains } from '/lib/store.js';
 
 let RESORTS = getMountains();
 let FAVS = getFavorites();
@@ -175,11 +175,12 @@ function renderHome() {
     }
     const pd = prefs.resorts.includes(r.id) ? powderDay(s.days, prefs) : null;
     return `
-      <a class="card rc" href="#/resort/${r.id}">
+      <a class="card rc${(s.current?.snowNowIn || 0) >= 0.02 ? ' snowing' : ''}" href="#/resort/${r.id}">
+        ${(s.current?.snowNowIn || 0) >= 0.02 ? `<div class="flakes" aria-hidden="true">${'<i></i>'.repeat(14)}</div>` : ''}
         <div class="rc-head">
           ${badge(r, 'sm')}
           <div class="rc-title">
-            <h2>${esc(r.name)}${pd ? ` <span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</h2>
+            <h2>${esc(r.name)}${(s.current?.snowNowIn || 0) >= 0.02 ? ' <span class="snow-now">Snowing</span>' : ''}${pd ? ` <span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</h2>
             <div class="sub">${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · ${esc(r.state || r.country || '')}<span class="depth" id="depth-${r.id}">${depthChip(r)}</span></div>
             <div class="mstatus" id="status-${r.id}">${statusLine(r)}</div>
           </div>
@@ -208,7 +209,8 @@ function renderHome() {
     <div class="updated">Updated ${ago(state.fetchedAt)} · ${lvl} snowfall · swipe left for history${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
     ${empty}${cards}
     ${list.length ? legendKey() : ''}
-    <p class="support"><a href="${VENMO_URL}" target="_blank" rel="noopener">♥ Support White Powder</a></p>`;
+    <p class="support"><a href="#" id="replay-tut">How White Powder works</a> · <a href="${VENMO_URL}" target="_blank" rel="noopener">♥ Support White Powder</a></p>`;
+  document.getElementById('replay-tut')?.addEventListener('click', (e) => { e.preventDefault(); showTutorial(); });
 
   app.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => {
     localStorage.setItem(VIEW_KEY, b.dataset.view); renderHome();
@@ -308,6 +310,9 @@ function statusInfo(r) {
 
 function statusLine(r) {
   const s = statusInfo(r);
+  const st = statusCache.get(r.id)?.data;
+  const pct = s.cls === 'open' && st?.total ? Math.round((st.open / st.total) * 100) : null;
+  if (pct != null) return `<span class="spie" style="--p:${pct}" title="${pct}% of lifts open"></span><span class="stext ${s.cls}">${esc(s.text)}</span>${s.note ? `<span class="snote"> · ${esc(s.note)}</span>` : ''}`;
   return `<span class="sdot ${s.cls}"></span><span class="stext ${s.cls}">${esc(s.text)}</span>${s.note ? `<span class="snote"> · ${esc(s.note)}</span>` : ''}`;
 }
 
@@ -587,12 +592,14 @@ async function loadCams(r) {
     camsCache.set(r.id, cams);
   }
   if (!el() || location.hash !== `#/resort/${r.id}`) return;
+  const live = (r.cams || []).map((c) => `<button class="cam embed" data-embed="${esc(c.embed)}" data-name="${esc(c.name)}"><div class="ph live"><span class="play">▶</span><span class="lv">LIVE</span></div><span>${esc(c.name)}</span></button>`).join('');
   const official = `<a class="cam official" href="${esc(camsLink(r))}" target="_blank" rel="noopener"><div class="ph">📷</div><span>${r.camsUrl ? `All ${esc(r.name)} cams` : `Search ${esc(r.name)} webcams`} ↗</span></a>`;
-  el().innerHTML = cams.list.map((c) => `
+  el().innerHTML = live + cams.list.map((c) => `
     <a class="cam" href="${esc(c.link)}" target="_blank" rel="noopener">
       <img src="${esc(c.image)}" alt="${esc(c.title)}" loading="lazy" />
       <span>${esc(c.title)}</span>
     </a>`).join('') + official;
+  el().querySelectorAll('[data-embed]').forEach((b) => b.addEventListener('click', () => openCam(b.dataset.name, b.dataset.embed, r)));
   if (cams.list.length) el().insertAdjacentHTML('afterend', `<p class="small muted" style="margin:6px 0 0">Webcam images via <a href="https://www.windy.com/webcams" target="_blank" rel="noopener">windy.com</a></p>`);
 }
 
@@ -992,6 +999,7 @@ function renderManage() {
     </section>
     <section class="section">
       <h3>Add a mountain</h3>
+      <button class="btn block" id="near-zip" style="margin:0 0 10px">📍 Add mountains near a ZIP code</button>
       <input id="q" class="search" type="search" placeholder="Search resorts or towns worldwide…" autocomplete="off" />
       <div id="results"></div>
       <p class="small muted" style="margin-top:10px">Base and summit elevations are measured from terrain data when you add a mountain — tap ✎ to fine-tune them.</p>
@@ -1079,12 +1087,155 @@ function renderManage() {
     renderManage();
   });
 
+  document.getElementById('near-zip').addEventListener('click', () => startOnboarding({ zipStep: true, addMode: true }));
   document.getElementById('reset').addEventListener('click', () => {
     if (!confirm('Replace your list with the original 5 mountains?')) return;
     localStorage.removeItem('wp:mountains:v1'); localStorage.removeItem('wp:favorites:v1');
     RESORTS = getMountains(); FAVS = getFavorites();
     renderManage(); refresh(true);
   });
+}
+
+// ---------- first launch: ZIP → nearby mountains, then a quick tutorial ----------
+const ONBOARD_KEY = 'wp:onboarded:v1';
+const kmBetween = (a, b, c, d) => {
+  const R = 6371, t = Math.PI / 180;
+  const x = Math.sin(((c - a) * t) / 2) ** 2 + Math.cos(a * t) * Math.cos(c * t) * Math.sin(((d - b) * t) / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+};
+
+/** Same-state mountains first (closest first), topped up with the nearest others within ~700 km. Max 6. */
+function pickNearby(lat, lon, stateName) {
+  const pool = [
+    ...DEFAULT_RESORTS,
+    ...CATALOG.filter((c) => !DEFAULT_RESORTS.some((d) => d.name.toLowerCase() === c.name.toLowerCase())),
+  ].map((c) => ({ c, d: kmBetween(lat, lon, c.lat, c.lon) })).sort((a, b) => a.d - b.d);
+  const st = String(stateName || '').toLowerCase();
+  const picks = pool.filter((x) => st && String(x.c.state || '').toLowerCase() === st).slice(0, 6);
+  for (const x of pool) { if (picks.length >= 5) break; if (!picks.includes(x) && x.d < 700) picks.push(x); }
+  const out = picks.length ? picks : pool.slice(0, 4);
+  return out.slice(0, 6).sort((a, b) => a.d - b.d);
+}
+
+/** Turn a default or catalog entry into a full mountain (catalog ones get elevations + nearest SNOTEL). */
+async function buildMountain(c, list) {
+  const def = DEFAULT_RESORTS.find((d) => d.id === c.id);
+  if (def) return { ...def };
+  let elev;
+  try { elev = await measureElevations(c.lat, c.lon); } catch { elev = { baseFt: 5000, summitFt: 7000 }; }
+  const snotel = c.country === 'USA' ? await nearestSnotel(c.lat, c.lon) : null;
+  return {
+    id: uniqueId(c.name, list), name: c.name, state: c.state || '', country: c.country || '',
+    region: [c.state, c.country].filter(Boolean).join(', '), lat: c.lat, lon: c.lon,
+    baseFt: elev.baseFt, summitFt: elev.summitFt, snotel, camsUrl: null, site: c.site || null, custom: true,
+  };
+}
+
+async function locate(q) {
+  q = q.trim();
+  if (/^\d{5}(-\d{4})?$/.test(q)) {
+    const z = await getJSON(`/api/zip?zip=${encodeURIComponent(q.slice(0, 5))}`).catch(() => null);
+    if (z && Number.isFinite(z.lat)) return { lat: z.lat, lon: z.lon, label: `${z.place}, ${z.stateCode}`, state: z.state };
+  }
+  const p = (await searchPlaces(q).catch(() => []))[0];
+  return p ? { lat: p.lat, lon: p.lon, label: [p.name, p.state].filter(Boolean).join(', '), state: p.state } : null;
+}
+
+function modal(html) {
+  document.querySelector('.modal.ob')?.remove();
+  const el = document.createElement('div');
+  el.className = 'modal ob';
+  el.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true">${html}</div>`;
+  document.body.appendChild(el);
+  return el;
+}
+
+function startOnboarding({ zipStep = !hasSavedMountains(), addMode = false } = {}) {
+  if (!zipStep) return showTutorial();
+  const el = modal(`
+    <img src="/icons/icon-192.png" alt="" width="64" height="64" style="border-radius:14px" />
+    <h2>${addMode ? 'Mountains near you' : 'Welcome to White Powder'}</h2>
+    <p>${addMode ? 'Enter a ZIP code or town and we\'ll add the closest mountains.' : 'Where do you ski from? Enter your ZIP code and we\'ll start you with mountains nearby.'}</p>
+    <form id="ob-form" class="ob-form">
+      <input id="ob-zip" class="search" inputmode="numeric" autocomplete="postal-code" placeholder="ZIP code (or town)" required />
+      <button class="btn primary block" id="ob-go">Find my mountains</button>
+    </form>
+    <p id="ob-msg" class="small muted" style="min-height:18px"></p>
+    <button class="btn block" id="ob-skip">${addMode ? 'Cancel' : 'Skip — start with the West Coast five'}</button>`);
+  const msg = (t, err) => { const m = el.querySelector('#ob-msg'); m.textContent = t; m.className = `small ${err ? 'err' : 'muted'}`; };
+  el.querySelector('#ob-skip').onclick = () => { el.remove(); if (!addMode) showTutorial(); };
+  el.querySelector('#ob-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const go = el.querySelector('#ob-go'); go.disabled = true;
+    msg('Finding you…');
+    const loc = await locate(el.querySelector('#ob-zip').value);
+    if (!loc) { msg("Couldn't find that ZIP code — try again or enter a town.", true); go.disabled = false; return; }
+    const picks = pickNearby(loc.lat, loc.lon, loc.state);
+    msg(`Near ${loc.label}: setting up ${picks.map((p) => p.c.name).join(', ')}…`);
+    const base = addMode ? [...RESORTS] : [];
+    const built = [];
+    for (const p of picks) {
+      if (base.concat(built).some((r) => r.name.toLowerCase() === p.c.name.toLowerCase())) continue;
+      built.push(await buildMountain(p.c, base.concat(built)));
+    }
+    RESORTS = base.concat(built); saveMountains(RESORTS);
+    if (!addMode) FAVS = new Set();
+    built.forEach((r) => FAVS.add(r.id)); saveFavorites(FAVS);
+    const pr = getPrefs(); pr.resorts = [...new Set([...(addMode ? pr.resorts : []), ...built.map((r) => r.id)])]; setPrefs(pr);
+    localStorage.setItem(VIEW_KEY, 'fav');
+    el.remove();
+    refresh(true);
+    if (addMode) { location.hash = '#/'; return; }
+    showTutorial(`Added ${built.length} mountains near ${loc.label}.`);
+  };
+  setTimeout(() => el.querySelector('#ob-zip')?.focus(), 100);
+}
+
+const TUTORIAL = [
+  ['🏔️', 'Your mountains', 'Each card shows whether the resort is open (the green circle fills as more lifts open), its base depth, and snow for the next 10 days. White bars are snow, blue is a rain/snow mix.'],
+  ['👉', 'Swipe the snow bars', 'Swipe a card\'s bars left to see the past week of snowfall, or right for days 11–15. They slide back into place when you scroll.'],
+  ['⛰️', 'Summit, Mid or Base', 'The toggle at the top switches every forecast to that elevation — warm storms can be rain at the base and powder up top.'],
+  ['📋', 'Tap a mountain for more', 'Detailed day/night and hourly forecasts, live webcams, the trail map, slopeside and in-town food, and the snow report.'],
+  ['⭐', 'Favorites & more mountains', 'Tap ☆ to favorite. Use Edit to add any resort in the world, reorder your list or remove mountains.'],
+  ['🔔', 'Powder alerts', 'Tap the bell to get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).'],
+];
+
+function showTutorial(intro = '') {
+  let i = 0;
+  const el = modal('<div id="tut"></div>');
+  const draw = () => {
+    const [icon, title, text] = TUTORIAL[i];
+    el.querySelector('#tut').innerHTML = `
+      ${i === 0 && intro ? `<p class="small ok">✓ ${esc(intro)}</p>` : ''}
+      <div class="tut-icon">${icon}</div>
+      <h2>${title}</h2>
+      <p>${text}</p>
+      <div class="tut-dots">${TUTORIAL.map((_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('')}</div>
+      <div class="tut-btns">
+        <button class="btn" id="tut-skip">${i === TUTORIAL.length - 1 ? 'Back' : 'Skip'}</button>
+        <button class="btn primary" id="tut-next">${i === TUTORIAL.length - 1 ? 'Start skiing' : 'Next'}</button>
+      </div>`;
+    el.querySelector('#tut-next').onclick = () => { if (i < TUTORIAL.length - 1) { i++; draw(); } else finish(); };
+    el.querySelector('#tut-skip').onclick = () => { if (i === TUTORIAL.length - 1) { i--; draw(); } else finish(); };
+  };
+  const finish = () => {
+    el.remove();
+    try { localStorage.setItem(ONBOARD_KEY, '1'); } catch {}
+    setTimeout(maybeShowDonate, 400);
+  };
+  draw();
+}
+
+// ---------- in-app resort webcams (tap to play the resort's own live player) ----------
+function openCam(name, embed, r) {
+  const el = modal(`
+    <div class="cam-h"><b>${esc(name)}</b><button class="circ sm" id="cam-x" aria-label="Close">✕</button></div>
+    <div class="cam-frame"><iframe src="${esc(embed)}" title="${esc(name)} webcam" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="eager" referrerpolicy="no-referrer-when-downgrade"></iframe></div>
+    <p class="small muted" style="margin:8px 0 0">Live from ${esc(r.name)}. Not loading? <a href="${esc(embed)}" target="_blank" rel="noopener">Open the cam ↗</a> or <a href="${esc(camsLink(r))}" target="_blank" rel="noopener">the resort's cam page ↗</a></p>`);
+  el.classList.add('cam-modal');
+  const close = () => el.remove();
+  el.querySelector('#cam-x').onclick = close;
+  el.addEventListener('click', (e) => { if (e.target === el) close(); });
 }
 
 // ---------- first-launch donation note ----------
@@ -1230,4 +1381,4 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 loadCached();
 safeRender();
 refresh();
-setTimeout(maybeShowDonate, 1200);
+setTimeout(() => (localStorage.getItem(ONBOARD_KEY) ? maybeShowDonate() : startOnboarding()), 700);

@@ -376,3 +376,9 @@ details.fmore summary { cursor: pointer; color: var(--accent); padding: 10px 0; 
 .rc-head .mstatus { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
 .rc-head .mstatus .stext { flex: none; }
 .rc-head .mstatus .snote { min-width: 0; flex: 1 1 auto; }
+
+/* brand */
+.brand { gap: 8px; }
+.brand-mark { height: 28px; width: auto; display: block; }
+.brand-word { height: 22px; width: auto; display: block; }
+@media (max-width: 360px) { .brand-word { height: 18px; } .brand-mark { height: 24px; } }

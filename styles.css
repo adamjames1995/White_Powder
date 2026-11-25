@@ -633,3 +633,26 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 /* strips are moved by one shared offset (see app.js), not native scrolling */
 .scroller { overflow: hidden; touch-action: pan-y; overscroll-behavior-x: auto; }
 .scroller > .strip { will-change: transform; }
+
+/* view tabs incl. passes, sort bar, pass chips */
+.seg-ctl.views button { padding-left: 10px; padding-right: 10px; }
+.seg-ctl.views .pass-epic.on { background: #2d4a8a; }
+.seg-ctl.views .pass-ikon.on { background: #0e7a6b; }
+.sortbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 2px 2px 6px; font-size: 13px; color: var(--text-secondary); }
+.sortbar select { margin-left: 4px; background: var(--surface-1, #222); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; font-size: 13px; }
+.linkbtn { background: none; border: 0; color: var(--accent); font-size: 13px; padding: 4px 0; cursor: pointer; }
+.passnote { margin: 0 2px 4px; }
+.passchip { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .03em; padding: 1px 5px; border-radius: 4px; vertical-align: 2px; margin-left: 4px; color: #fff; }
+.passchip.epic { background: #2d4a8a; }
+.passchip.ikon { background: #0e7a6b; }
+.drive { color: var(--text-primary); font-weight: 600; }
+
+/* swipe-to-remove */
+.swc { position: relative; margin-bottom: 8px; border-radius: var(--radius); overflow: hidden; transition: opacity .2s, transform .2s; }
+.swc > .card { margin-bottom: 0; position: relative; z-index: 1; will-change: transform; }
+.sw-del { position: absolute; top: 0; right: 0; bottom: 0; width: 92px; border: 0; border-radius: 0 var(--radius) var(--radius) 0; background: #d63b3b; color: #fff; font-size: 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; opacity: 0; transition: opacity .15s; }
+.sw-del span { font-size: 12px; font-weight: 600; }
+.swc.open .sw-del { opacity: 1; }
+.swc.removing { opacity: 0; transform: translateX(-40px); }
+.swc.dragging { overflow: visible; }
+.swc.dragging > .card { outline: 2px solid var(--accent); }

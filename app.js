@@ -1,4 +1,4 @@
-import { CATALOG, logoUrl, openingFor, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
+import { CATALOG, logoUrl, openingFor, passOf, PASSES, slug, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS, midFt } from '/lib/snow.js';
 import { fetchDetail, compass } from '/lib/detail.js';
 import { foodQuery, fetchOverpass, buildFood } from '/lib/food.js';
@@ -6,7 +6,9 @@ import { getMountains, saveMountains, getFavorites, saveFavorites, uniqueId, mea
 
 let RESORTS = getMountains();
 let FAVS = getFavorites();
-const byId = (id) => RESORTS.find((r) => r.id === id);
+// Pass mountains that aren't on the user's list yet (shown in the Epic / Ikon views).
+const EXTRA = [];
+const byId = (id) => RESORTS.find((r) => r.id === id) || EXTRA.find((r) => r.id === id);
 const VIEW_KEY = 'wp:view:v1';
 const LEVEL_KEY = 'wp:level:v1';
 const LEVELS = { summit: 'Summit', mid: 'Mid', base: 'Base' };
@@ -71,7 +73,7 @@ async function refresh(force = false) {
   refreshBtn.classList.add('spin');
   try {
     stage('requesting forecast');
-    const data = await loadAll(RESORTS);
+    const data = await loadAll([...RESORTS, ...EXTRA.filter((m) => !m.placeholder)]);
     stage('drawing');
     state = { data, fetchedAt: Date.now(), error: null };
     try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, fetchedAt: state.fetchedAt })); } catch {}
@@ -156,7 +158,186 @@ function historyDays(r, s) {
 function shownList() {
   const view = localStorage.getItem(VIEW_KEY) || 'fav';
   const favs = RESORTS.filter((r) => FAVS.has(r.id));
-  return { view, list: view === 'fav' ? favs : RESORTS, favCount: favs.length };
+  let list = view === 'fav' ? favs : RESORTS;
+  if (PASSES[view]) {
+    ensurePass(view);
+    list = [...RESORTS.filter((r) => passOf(r) === view), ...EXTRA.filter((r) => r.pass === view)];
+  }
+  return { view, list: sortList(list), favCount: favs.length };
+}
+
+// ---------- Epic / Ikon views: every mountain on the pass, including ones not on your list ----------
+const PASSMTN_KEY = 'wp:passmtn:v1';
+const passBuilding = new Set();
+const onList = (c) => RESORTS.some((r) => r.name === c.name || (Math.abs(r.lat - c.lat) < 0.02 && Math.abs(r.lon - c.lon) < 0.02));
+function ensurePass(pass) {
+  if (passBuilding.has(pass) || passBuilding.has(`${pass}:done`)) return;
+  passBuilding.add(pass);
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(PASSMTN_KEY) || '{}'); } catch {}
+  const todo = CATALOG.filter((c) => c.pass === pass && !onList(c) && !EXTRA.some((x) => x.name === c.name));
+  // Show every mountain right away (placeholder until its elevations are measured), then fill in.
+  for (const c of todo) {
+    const m = saved[c.name] ? { ...saved[c.name], opening: c.opening, openingEst: c.openingEst } : { id: `x-${slug(c.name)}`, name: c.name, state: c.state, country: c.country, lat: c.lat, lon: c.lon, site: c.site, pass, placeholder: true };
+    m.pass = pass; m.extra = true;
+    EXTRA.push(m);
+  }
+  (async () => {
+    const pending = EXTRA.filter((m) => m.pass === pass && m.placeholder);
+    const show = () => { if (location.hash.length <= 2 && localStorage.getItem(VIEW_KEY) === pass && !sortActive && !SX.anim) renderHome(); };
+    const loadData = async () => {
+      const need = EXTRA.filter((m) => m.pass === pass && !m.placeholder && !state.data?.[m.id]);
+      if (!need.length) return;
+      const d = await loadAll(need).catch(() => ({}));
+      state.data = { ...(state.data || {}), ...d };
+    };
+    await loadData(); // mountains measured on an earlier visit
+    show();
+    for (let i = 0; i < pending.length; i += 8) {
+      await Promise.all(pending.slice(i, i + 8).map(async (m) => {
+        const c = CATALOG.find((x) => x.name === m.name);
+        const built = await buildMountain(c, RESORTS).catch(() => null);
+        if (!built) return;
+        Object.assign(m, built, { id: m.id, pass, extra: true, placeholder: false, custom: true });
+        saved[m.name] = { ...m };
+      }));
+      try { localStorage.setItem(PASSMTN_KEY, JSON.stringify(saved)); } catch {}
+      await loadData(); // fill cards in as each batch is ready
+      show();
+    }
+    passBuilding.delete(pass); passBuilding.add(`${pass}:done`);
+    show();
+  })();
+}
+// Adding a pass mountain to your list (starring it in the Epic/Ikon view).
+function adoptExtra(id) {
+  const i = EXTRA.findIndex((m) => m.id === id);
+  if (i < 0 || EXTRA[i].placeholder) return false;
+  const [m] = EXTRA.splice(i, 1);
+  const { extra, placeholder, ...keep } = m;
+  RESORTS.push(keep); saveMountains(RESORTS);
+  FAVS.add(m.id); saveFavorites(FAVS);
+  return true;
+}
+
+// ---------- sorting ----------
+const SORT_KEY = 'wp:sort:v1';
+const SORTS = { order: 'My order', drive: 'Drive time', depth: 'Base depth', recent: 'Recent snow', best: 'Best snow for the drive' };
+const getSort = () => { const v = localStorage.getItem(SORT_KEY); return SORTS[v] ? v : 'order'; };
+const HOME_KEY = 'wp:home:v1';
+const getHome = () => { try { return JSON.parse(localStorage.getItem(HOME_KEY) || 'null'); } catch { return null; } };
+const setHome = (h) => { try { localStorage.setItem(HOME_KEY, JSON.stringify(h)); } catch {} driveCache.clear(); };
+const driveCache = new Map(); // id -> { min, km, est }
+
+function depthOf(r) {
+  if (hasStationDepth(r)) return snotelCache.get(r.id).depthIn;
+  const v = modelDepth.get(r.id);
+  return v == null ? null : v;
+}
+function recentOf(r) {
+  const o = snotelCache.get(r.id);
+  if (o && !o.error && o.new72In != null) return o.new72In;
+  const s = state.data?.[r.id]?.[getLevel()];
+  return s?.current?.modeled72In ?? null;
+}
+const driveOf = (r) => driveCache.get(r.id)?.min ?? null;
+// Snow worth driving for: fresh snow counts most, base depth a little, divided by hours behind the wheel (min 1 h).
+function bestScore(r) {
+  const fresh = recentOf(r) || 0, depth = depthOf(r) || 0, min = driveOf(r);
+  if (min == null) return null;
+  return (3 * fresh + 0.15 * depth) / Math.max(1, min / 60);
+}
+function sortList(list) {
+  const k = getSort();
+  if (k === 'order') return list;
+  const val = { drive: (r) => (driveOf(r) == null ? null : -driveOf(r)), depth: depthOf, recent: recentOf, best: bestScore }[k];
+  return [...list].sort((a, b) => {
+    const x = val(a), y = val(b);
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return y - x;
+  });
+}
+const fmtDrive = (m) => (m < 60 ? `${Math.round(m)} min` : `${Math.floor(m / 60)}h ${String(Math.round(m % 60)).padStart(2, '0')}m`);
+
+/** Driving times from home to each mountain (OSRM road routing; falls back to a straight-line estimate). */
+let driveBusy = false;
+async function ensureDrive(list) {
+  const home = getHome();
+  if (!home || driveBusy) return;
+  const need = list.filter((r) => !driveCache.has(r.id) && Number.isFinite(r.lat));
+  if (!need.length) return;
+  driveBusy = true;
+  const crow = (r) => {
+    const R = 6371, toR = Math.PI / 180, dLat = (r.lat - home.lat) * toR, dLon = (r.lon - home.lon) * toR;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(home.lat * toR) * Math.cos(r.lat * toR) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  };
+  for (let i = 0; i < need.length; i += 60) {
+    const batch = need.slice(i, i + 60);
+    let got = null;
+    try {
+      const coords = [[home.lon, home.lat], ...batch.map((r) => [r.lon, r.lat])].map((c) => c.map((v) => v.toFixed(5)).join(',')).join(';');
+      const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12000);
+      const res = await fetch(`https://router.project-osrm.org/table/v1/driving/${coords}?sources=0&annotations=duration,distance`, { signal: ctrl.signal });
+      clearTimeout(t);
+      const j = await res.json();
+      if (j.code === 'Ok') got = j;
+    } catch {}
+    batch.forEach((r, k) => {
+      const sec = got?.durations?.[0]?.[k + 1];
+      if (sec != null) driveCache.set(r.id, { min: sec / 60, km: (got.distances?.[0]?.[k + 1] || 0) / 1000 });
+      else { const km = crow(r); driveCache.set(r.id, { min: ((km * 1.25) / 90) * 60, km, est: true }); } // straight line × 1.25 at ~55 mph
+    });
+  }
+  driveBusy = false;
+  if (location.hash.length <= 2) renderHome();
+}
+
+async function askHome() {
+  const viaGps = () => new Promise((res) => {
+    if (!navigator.geolocation) return res(null);
+    navigator.geolocation.getCurrentPosition((p) => res({ lat: p.coords.latitude, lon: p.coords.longitude, label: 'your location' }), () => res(null), { timeout: 10000, maximumAge: 600000 });
+  });
+  let h = await viaGps();
+  if (!h) {
+    const q = prompt('Where are you starting from? Enter a ZIP code or town.');
+    if (!q) return null;
+    h = await locate(q).catch(() => null);
+    if (!h) { alert('Couldn\'t find that place.'); return null; }
+  }
+  setHome({ lat: h.lat, lon: h.lon, label: h.label });
+  return h;
+}
+
+// Re-sort when depths / snow reports / drive times arrive (debounced, never mid-gesture).
+let resortTimer = 0;
+function scheduleResort() {
+  if (getSort() === 'order') return;
+  clearTimeout(resortTimer);
+  resortTimer = setTimeout(() => {
+    if (location.hash.length > 2 || sortActive || SX.anim) return;
+    const want = shownList().list.map((r) => r.id).join(','); // only redraw if the order actually changed
+    const have = [...app.querySelectorAll('.swc[data-id]')].map((e) => e.dataset.id).join(',');
+    if (want !== have) renderHome();
+  }, 700);
+}
+
+const delBtn = (r) => (r.extra ? '' : `<button class="sw-del" data-del="${r.id}" aria-label="Remove ${esc(r.name)}">🗑<span>Remove</span></button>`);
+function removeMountain(id) {
+  const i = RESORTS.findIndex((r) => r.id === id);
+  if (i < 0) return;
+  RESORTS.splice(i, 1); saveMountains(RESORTS);
+  FAVS.delete(id); saveFavorites(FAVS);
+  const p = getPrefs(); p.resorts = p.resorts.filter((x) => x !== id); setPrefs(p); syncSub();
+}
+const passChip = (r) => { const p = passOf(r); return p ? ` <span class="passchip ${p}">${PASSES[p]}</span>` : ''; };
+function driveChip(r) {
+  const k = getSort();
+  if (k !== 'drive' && k !== 'best') return '';
+  const d = driveCache.get(r.id);
+  return d ? ` · <span class="drive">🚗 ${d.est ? '~' : ''}${fmtDrive(d.min)}</span>` : '';
 }
 
 function renderHome() {
@@ -168,34 +349,35 @@ function renderHome() {
     return;
   }
   const prefs = getPrefs();
-  const { view, list, favCount } = shownList();
+  let { view, list, favCount } = shownList();
   const cards = list.map((r) => {
     const s = state.data[r.id]?.[getLevel()];
     const star = `<button class="star ${FAVS.has(r.id) ? 'on' : ''}" data-star="${r.id}" aria-label="${FAVS.has(r.id) ? 'Remove from' : 'Add to'} favorites">${FAVS.has(r.id) ? '★' : '☆'}</button>`;
     if (!s) {
-      return `<div class="card rc" data-id="${r.id}"><div class="rc-head">${badge(r)}<div class="rc-title"><h2>${esc(r.name)}</h2><div class="sub">Loading forecast…</div></div>${star}</div></div>`;
+      return `<div class="swc" data-id="${r.id}">${delBtn(r)}<div class="card rc"><div class="rc-head">${badge(r)}<div class="rc-title"><h2>${esc(r.name)}${passChip(r)}</h2><div class="sub">${esc(r.state || r.country || '')} · Loading forecast…</div></div>${star}</div></div></div>`;
     }
     const pd = prefs.resorts.includes(r.id) ? powderDay(s.days, prefs) : null;
     const wx = weatherNow(s);
     return `
-      <a class="card rc${wx ? ' snowing' : ''}" data-id="${r.id}" href="#/resort/${r.id}">
+      <div class="swc" data-id="${r.id}">${delBtn(r)}<a class="card rc${wx ? ' snowing' : ''}" href="#/resort/${r.id}">
         ${wx ? precipFx(wx) : ''}
         <div class="rc-head">
           ${badge(r, 'sm')}
           <div class="rc-title">
-            <h2>${esc(r.name)}${wx ? ` <span class="snow-now ${wx.kind}">${wx.label}</span>` : ''}${pd ? ` <span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</h2>
-            <div class="sub">${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · ${esc(r.state || r.country || '')}<span class="depth" id="depth-${r.id}">${depthChip(r)}</span></div>
+            <h2>${esc(r.name)}${passChip(r)}${wx ? ` <span class="snow-now ${wx.kind}">${wx.label}</span>` : ''}${pd ? ` <span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</h2>
+            <div class="sub">${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · ${esc(r.state || r.country || '')}<span class="depth" id="depth-${r.id}">${depthChip(r)}</span>${driveChip(r)}</div>
             <div class="mstatus" id="status-${r.id}">${statusLine(r)}</div>
           </div>
           ${star}
         </div>
         <div class="scroller compact" data-strip="${r.id}"></div>
-      </a>`;
+      </a></div>`;
   }).join('');
   const empty = view === 'fav' && !favCount
     ? `<div class="card pad"><p>No favorites yet.</p><p class="small muted">Tap ☆ on any mountain under <b>All</b>, or add new mountains with <b>+</b>.</p></div>`
     : !RESORTS.length ? `<div class="card pad"><p>No mountains yet.</p><a class="btn primary" href="#/manage">Add mountains</a></div>` : '';
   const lvl = getLevel();
+  const sortKey = getSort(), home = getHome(), needsHome = sortKey === 'drive' || sortKey === 'best';
   app.innerHTML = `
     <div class="levelbar" role="radiogroup" aria-label="Forecast elevation">
       <button data-level="summit" class="${lvl === 'summit' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'summit'}">▲ Summit</button>
@@ -203,12 +385,20 @@ function renderHome() {
       <button data-level="base" class="${lvl === 'base' ? 'on' : ''}" role="radio" aria-checked="${lvl === 'base'}">▼ Base</button>
     </div>
     <div class="homebar">
-      <div class="seg-ctl" role="tablist">
-        <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favorites</button>
-        <button data-view="all" class="${view === 'all' ? 'on' : ''}">All (${RESORTS.length})</button>
+      <div class="seg-ctl views" role="tablist">
+        <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favs</button>
+        <button data-view="all" class="${view === 'all' ? 'on' : ''}">All</button>
+        <button data-view="epic" class="pass-epic ${view === 'epic' ? 'on' : ''}">Epic</button>
+        <button data-view="ikon" class="pass-ikon ${view === 'ikon' ? 'on' : ''}">Ikon</button>
       </div>
       <a class="addbtn" href="#/manage" aria-label="Add or remove mountains" title="Add or remove mountains">+</a>
     </div>
+    <div class="sortbar">
+      <label>Sort <select id="sortby">${Object.entries(SORTS).map(([k, v]) => `<option value="${k}" ${k === sortKey ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      ${needsHome ? `<button class="linkbtn" id="sethome">📍 ${home ? `From ${esc(home.label)} · change` : 'Set your starting point'}</button>` : ''}
+    </div>
+    ${PASSES[view] ? `<div class="small muted passnote">${list.length} ${PASSES[view]} Pass mountains${passBuilding.has(view) ? ' · loading the rest…' : ''} · ☆ adds one to your list</div>` : ''}
+    ${sortKey === 'best' ? '<div class="small muted passnote">Ranked by fresh snow (last 72 h) and base depth per hour of driving.</div>' : ''}
     <div class="updated">Updated ${ago(state.fetchedAt)} · ${lvl} snowfall · swipe for past 15 days${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
     ${empty}${cards}
     ${list.length ? legendKey() : ''}
@@ -221,23 +411,39 @@ function renderHome() {
   app.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => {
     localStorage.setItem(LEVEL_KEY, b.dataset.level); renderHome();
   }));
-  sortable(app, '.card.rc[data-id]', { longPress: 450, onDrop: applyOrder });
+  if (sortKey === 'order') sortable(app, '.swc[data-id]', { longPress: 450, onDrop: applyOrder });
   app.querySelectorAll('[data-star]').forEach((b) => b.addEventListener('click', (e) => {
     e.preventDefault(); e.stopPropagation();
-    toggleFav(b.dataset.star); renderHome();
+    if (!adoptExtra(b.dataset.star)) toggleFav(b.dataset.star);
+    renderHome();
   }));
+  app.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const w = b.closest('.swc');
+    w.classList.add('removing');
+    setTimeout(() => { removeMountain(b.dataset.del); renderHome(); }, 220);
+  }));
+  document.getElementById('sortby')?.addEventListener('change', async (e) => {
+    localStorage.setItem(SORT_KEY, e.target.value);
+    if ((e.target.value === 'drive' || e.target.value === 'best') && !getHome()) await askHome();
+    renderHome();
+  });
+  document.getElementById('sethome')?.addEventListener('click', async () => { if (await askHome()) renderHome(); });
+  if (needsHome) ensureDrive(list);
   mountStrips(false);
+  list = list.filter((r) => !r.placeholder);
   list.forEach((r) => loadObs(r).then(async () => {
     mountStrips(false, r.id);
     if (!hasStationDepth(r)) await loadModelDepth(r);
     const el = document.getElementById(`depth-${r.id}`);
     if (el) el.innerHTML = depthChip(r);
+    scheduleResort();
   }));
   list.forEach((r) => loadStatus(r).then(() => {
     const el = document.getElementById(`status-${r.id}`);
     if (el) el.innerHTML = statusLine(r);
   }));
-  list.filter((r) => !state.data[r.id]?.[getLevel()]).forEach((r) => loadOne(r).then(() => location.hash.length <= 2 && renderHome()));
+  list.filter((r) => !r.extra && !state.data[r.id]?.[getLevel()]).forEach((r) => loadOne(r).then(() => location.hash.length <= 2 && renderHome()));
 }
 
 /** What's falling right now, and how hard (inches of snow per hour; blizzard = heavy snow + strong gusts). */
@@ -1253,8 +1459,10 @@ async function buildMountain(c, list) {
   const def = DEFAULT_RESORTS.find((d) => d.id === c.id);
   if (def) return { ...def };
   let elev;
-  try { elev = await measureElevations(c.lat, c.lon); } catch { elev = { baseFt: 5000, summitFt: 7000 }; }
-  const snotel = c.country === 'USA' ? await nearestSnotel(c.lat, c.lon) : null;
+  const within = (p, ms, fb) => Promise.race([p, new Promise((res) => setTimeout(() => res(fb), ms))]);
+  try { elev = await within(measureElevations(c.lat, c.lon), 12000, null); } catch { elev = null; }
+  if (!elev) elev = { baseFt: 5000, summitFt: 7000 };
+  const snotel = c.country === 'USA' ? await within(nearestSnotel(c.lat, c.lon), 8000, null) : null;
   return {
     id: uniqueId(c.name, list), name: c.name, state: c.state || '', country: c.country || '',
     region: [c.state, c.country].filter(Boolean).join(', '), lat: c.lat, lon: c.lon,
@@ -1300,6 +1508,7 @@ function startOnboarding({ zipStep = !hasSavedMountains(), addMode = false } = {
     const go = el.querySelector('#ob-go'); go.disabled = true;
     msg('Finding you…');
     const loc = await locate(el.querySelector('#ob-zip').value);
+    if (loc) setHome({ lat: loc.lat, lon: loc.lon, label: loc.label });
     if (!loc) { msg("Couldn't find that ZIP code — try again or enter a town.", true); go.disabled = false; return; }
     const picks = pickNearby(loc.lat, loc.lon, loc.state);
     msg(`Near ${loc.label}: setting up ${picks.map((p) => p.c.name).join(', ')}…`);
@@ -1576,7 +1785,7 @@ async function renderSettings() {
 // ---------- snow strips: one shared horizontal position for every row ----------
 // The strips don't scroll natively: one gesture drives a single offset that every row renders,
 // so all rows move, coast and bounce together frame-for-frame.
-const K = 0.00045, C = 2 * Math.sqrt(K); // critically damped spring (per ms)
+const K = 0.00016, C = 2 * Math.sqrt(K); // soft, critically damped spring (per ms) — iOS-like ~0.4 s settle
 const allStrips = () => document.querySelectorAll('[data-strip][data-home]');
 function stripGeom() {
   const el = document.querySelector('[data-strip][data-home]');
@@ -1595,15 +1804,22 @@ function applyX() {
   const d = shownX();
   for (const el of allStrips()) { const s = el.firstElementChild; if (s) s.style.transform = `translate3d(${-d}px,0,0)`; }
 }
-// Where to rest: home if more than half of "Last 24h" is on screen, otherwise stay.
+// Where to rest after a swipe:
+//  · back into history: return to "Last 24h" only if less than half a Days 1-5 block's width of history is showing
+//  · toward the forecast: return if more than half of the "Last 24h" box is still on screen
 function homeTarget() {
   const g = stripGeom();
   const box = g?.s.querySelector('.l24');
   if (!box) return null;
+  const home = Number(g.el.dataset.home);
+  if (Math.abs(SX.x - home) <= 1) return null;
+  if (SX.x < home) {
+    const block = (g.s.querySelector('.seg.fc .grp')?.offsetWidth) || 125;
+    return home - SX.x < block / 2 ? home : null;
+  }
   const left = box.getBoundingClientRect().left - g.s.getBoundingClientRect().left, w = box.offsetWidth || 1;
   const seen = Math.max(0, Math.min(SX.x + g.W, left + w) - Math.max(SX.x, left)) / w;
-  const home = Number(g.el.dataset.home);
-  return seen > 0.5 && Math.abs(SX.x - home) > 1 ? home : null;
+  return seen > 0.5 ? home : null;
 }
 function animate() {
   cancelAnimationFrame(SX.anim);
@@ -1613,7 +1829,7 @@ function animate() {
     const g = stripGeom(); if (!g) { SX.anim = 0; return; }
     if (SX.mode === 'free') {
       SX.v *= Math.pow(0.996, dt); SX.x += SX.v * dt;
-      if (SX.x < 0 || SX.x > g.max) { SX.mode = 'spring'; SX.target = SX.x < 0 ? 0 : g.max; } // overshoot → bounce back
+      if (SX.x < 0 || SX.x > g.max) { SX.mode = 'spring'; SX.target = SX.x < 0 ? 0 : g.max; SX.v *= 0.45; } // overshoot → soft bounce back
       else if (Math.abs(SX.v) < 0.03) {
         const h = homeTarget();
         if (h == null) { SX.v = 0; applyX(); SX.anim = 0; return; }
@@ -1688,6 +1904,45 @@ document.addEventListener('wheel', (e) => {
   wheelTimer = setTimeout(() => { SX.mode = 'free'; SX.v = 0; animate(); }, 160);
 }, { passive: false });
 window.addEventListener('resize', applyX);
+
+// ---------- swipe a home card left to reveal its trash can ----------
+(() => {
+  const OPEN = 92;
+  let g = null, openEl = null;
+  const setX = (w, x, anim) => { const c = w.querySelector('.card'); c.style.transition = anim ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none'; c.style.transform = x ? `translateX(${x}px)` : ''; w.classList.toggle('open', x < -10); };
+  const close = () => { if (openEl) { setX(openEl, 0, true); openEl = null; } };
+  document.addEventListener('touchstart', (e) => {
+    const w = e.target instanceof Element && e.target.closest('.swc');
+    if (openEl && (!w || w !== openEl || !e.target.closest('.sw-del'))) { if (!e.target.closest?.('.sw-del')) { close(); if (w) { g = null; return; } } }
+    if (!w || !w.querySelector('.sw-del') || e.target.closest('[data-strip], .star, .sw-del') || sortActive) { g = null; return; }
+    const t = e.touches[0];
+    g = { w, x0: t.clientX, y0: t.clientY, axis: null, base: w === openEl ? -OPEN : 0, x: 0 };
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (!g) return;
+    const t = e.touches[0], dx = t.clientX - g.x0, dy = t.clientY - g.y0;
+    if (!g.axis) { if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return; g.axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y'; }
+    if (g.axis !== 'x' || sortActive) { g = null; return; }
+    e.preventDefault();
+    let x = g.base + dx;
+    if (x > 0) x = x * 0.2; // resist dragging right
+    if (x < -OPEN) x = -OPEN + (x + OPEN) * 0.35; // and past the button
+    g.x = x; setX(g.w, x, false);
+  }, { passive: false });
+  const end = () => {
+    if (!g) return;
+    const { w, axis, x } = g; g = null;
+    if (axis !== 'x') return;
+    const stop = (ev) => { ev.preventDefault(); ev.stopPropagation(); };
+    document.addEventListener('click', stop, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', stop, true), 350);
+    if (x < -OPEN / 2) { if (openEl && openEl !== w) close(); setX(w, -OPEN, true); openEl = w; }
+    else { setX(w, 0, true); if (openEl === w) openEl = null; }
+  };
+  document.addEventListener('touchend', end, { passive: true });
+  document.addEventListener('touchcancel', end, { passive: true });
+  window.addEventListener('hashchange', () => { openEl = null; });
+})();
 
 // ---------- pull down to refresh (iOS home-screen apps have no built-in one) ----------
 async function hardRefresh() {

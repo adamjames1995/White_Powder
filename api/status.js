@@ -73,6 +73,20 @@ export default async function handler(req, res) {
   const id = String(req.query.id || '').replace(/[^a-z0-9-]/gi, '');
   const feed = FEEDS[id];
   if (!feed) { res.setHeader('Cache-Control', 's-maxage=86400'); return res.status(200).json({ found: false }); }
+  if (req.query.snip && feed.type === 'vail') {
+    try {
+      const html = await get(feed.url, 'text/html');
+      const out = {};
+      const i = html.search(/Lifts\s*Open/i);
+      out.near = i >= 0 ? html.slice(Math.max(0, i - 700), i + 100).replace(/\s+/g, ' ') : null;
+      out.vars = [...new Set((html.match(/FR\.[A-Za-z]+\s*=/g) || []))];
+      const j = html.indexOf('TerrainStatusFeed = {');
+      out.feedHead = j >= 0 ? html.slice(j, j + 600).replace(/\s+/g, ' ') : null;
+      const k = html.search(/"?(LiftsOpen|OpenLifts|liftsOpen|TotalLifts)"?\s*:/);
+      out.counts = k >= 0 ? html.slice(Math.max(0, k - 200), k + 300).replace(/\s+/g, ' ') : null;
+      return res.status(200).json(out);
+    } catch (e) { return res.status(200).json({ error: String(e) }); }
+  }
   try {
     let lifts;
     if (feed.type === 'mtnpowder') lifts = fromMtnpowder(JSON.parse(await get(`https://mtnpowder.com/feed/${feed.id}/lifts`, 'application/json')));

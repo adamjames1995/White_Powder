@@ -620,3 +620,12 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 .mrow.dragging { background: var(--surface-1); border-radius: 10px; }
 .grip { cursor: grab; touch-action: none; color: var(--text-muted); font-size: 18px; padding: 6px 4px; }
 .sorting .card.rc:not(.dragging), .sorting .mrow:not(.dragging) { opacity: .85; }
+
+/* pull to refresh */
+.ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 64px); z-index: 60; width: 36px; height: 36px; margin-left: -18px;
+  border-radius: 50%; background: var(--surface-1, #222); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center;
+  transform: translateY(calc(var(--pull, 0px) - 20px)); opacity: 0; pointer-events: none; transition: opacity .15s; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+.ptr-ic { color: var(--accent); font-size: 18px; font-weight: 700; transition: transform .15s; }
+.ptr.ready .ptr-ic { transform: rotate(180deg); }
+.ptr.spin .ptr-ic { animation: wp-spin .8s linear infinite; }
+@keyframes wp-spin { to { transform: rotate(360deg); } }

@@ -1592,10 +1592,47 @@ document.addEventListener('scroll', (e) => {
   if (!touching) settleTimer = setTimeout(() => settle(el), 160); // once the swipe (and its momentum) stops
 }, true);
 
+// ---------- pull down to refresh (iOS home-screen apps have no built-in one) ----------
+async function hardRefresh() {
+  statusCache.clear(); snotelCache.clear(); obsPending.clear(); camsCache.clear(); modelDepth.clear();
+  await refresh(true);
+}
+(() => {
+  const ind = document.createElement('div');
+  ind.className = 'ptr'; ind.innerHTML = '<span class="ptr-ic">↓</span>';
+  document.body.appendChild(ind);
+  const TRIGGER = 70;
+  let y0 = null, pull = 0, busy = false;
+  const blocked = (t) => sortActive || busy || document.querySelector('.tour, .modal') || (t instanceof Element && t.closest('.modal, .cam-frame, .leaflet-container, [data-strip]'));
+  const show = (d) => {
+    ind.style.setProperty('--pull', `${Math.min(d, TRIGGER * 1.4)}px`);
+    ind.classList.toggle('ready', d >= TRIGGER);
+    ind.style.opacity = String(Math.min(1, d / TRIGGER));
+  };
+  document.addEventListener('touchstart', (e) => {
+    y0 = window.scrollY <= 0 && e.touches.length === 1 && !blocked(e.target) ? e.touches[0].clientY : null; pull = 0;
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (y0 == null) return;
+    if (window.scrollY > 0) { y0 = null; show(0); return; }
+    pull = Math.max(0, (e.touches[0].clientY - y0) * 0.5);
+    show(pull);
+  }, { passive: true });
+  document.addEventListener('touchend', async () => {
+    if (y0 == null) return;
+    y0 = null;
+    if (pull < TRIGGER) { ind.style.opacity = '0'; show(0); return; }
+    busy = true; ind.classList.add('spin'); ind.firstChild.textContent = '↻'; show(TRIGGER);
+    try { await hardRefresh(); } finally {
+      busy = false; ind.classList.remove('spin', 'ready'); ind.firstChild.textContent = '↓'; ind.style.opacity = '0'; show(0);
+    }
+  }, { passive: true });
+})();
+
 // ---------- boot ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 window.addEventListener('hashchange', () => { window.scrollTo(0, 0); safeRender(); });
-refreshBtn.addEventListener('click', () => refresh(true));
+refreshBtn.addEventListener('click', () => hardRefresh());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
 loadCached();
 safeRender();

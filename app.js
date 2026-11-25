@@ -20,7 +20,7 @@ const stage = (s) => window.__wpStage?.(s);
 
 const app = document.getElementById('app');
 const refreshBtn = document.getElementById('refresh');
-const CACHE_KEY = 'wp:forecast:v4';
+const CACHE_KEY = 'wp:forecast:v5';
 const PREFS_KEY = 'snowline:prefs:v1';
 const FRESH_MS = 30 * 60 * 1000;
 
@@ -146,7 +146,7 @@ function sharedScale() {
 function historyDays(r, s) {
   const obs = snotelCache.get(r.id);
   const rep = new Map((obs && !obs.error && obs.daily ? obs.daily : []).map((d) => [d.date, d.newIn]));
-  return (s.history || []).slice(-7).map((d) => {
+  return (s.history || []).slice(-15).map((d) => {
     const v = rep.get(d.date);
     return v != null ? { date: d.date, snow: v, src: 'rep' } : { date: d.date, snow: d.snow, mixed: d.mixed, src: 'est' };
   });
@@ -207,7 +207,7 @@ function renderHome() {
       </div>
       <a class="btn sm" href="#/manage">Edit</a>
     </div>
-    <div class="updated">Updated ${ago(state.fetchedAt)} · ${lvl} snowfall · swipe left for history${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
+    <div class="updated">Updated ${ago(state.fetchedAt)} · ${lvl} snowfall · swipe for past 15 days${state.error ? ` · <span class="err">refresh failed</span>` : ''}</div>
     ${empty}${cards}
     ${list.length ? legendKey() : ''}
     <p class="support"><a href="#" id="replay-tut">How White Powder works</a> · <a href="${VENMO_URL}" target="_blank" rel="noopener">♥ Support White Powder</a></p>`;
@@ -1230,7 +1230,7 @@ function startOnboarding({ zipStep = !hasSavedMountains(), addMode = false } = {
 
 const TUTORIAL = [
   ['🏔️', 'Your mountains', 'Each card shows whether the resort is open (the green circle fills as more lifts open), its base depth, and snow for the next 10 days. White bars are snow, blue is a rain/snow mix.'],
-  ['👉', 'Swipe the snow bars', 'Swipe a card\'s bars left to see the past week of snowfall, or right for days 11–15. They slide back into place when you scroll.'],
+  ['👉', 'Swipe the snow bars', 'Swipe a card\'s bars to see the past 15 days of snowfall or days 11–15 of the forecast. Every card moves together.'],
   ['⛰️', 'Summit, Mid or Base', 'The toggle at the top switches every forecast to that elevation — warm storms can be rain at the base and powder up top.'],
   ['📋', 'Tap a mountain for more', 'Detailed day/night and hourly forecasts, live webcams, the trail map, slopeside and in-town food, and the snow report.'],
   ['⭐', 'Favorites & more mountains', 'Tap ☆ to favorite. Use Edit to add any resort in the world, reorder your list or remove mountains.'],
@@ -1279,7 +1279,7 @@ const tourResort = () => (shownList().list[0] || RESORTS[0])?.id;
 const TOUR = [
   { sel: '.levelbar', title: 'Summit, Mid or Base', text: 'Switch every forecast to that elevation. Warm storms can be rain at the base and powder up top.', tryit: 'Pick your favorite now — tap Summit, Mid or Base.' },
   { sel: '.card.rc .mstatus', title: 'Open or closed', text: 'Live from the resort\'s lift feed. The green circle fills with the share of lifts running; closed resorts show their expected opening date.' },
-  { sel: '.card.rc .scroller', title: 'Snow for the next 10 days', text: 'White bars are snow, blue is a rain/snow mix. Swipe left for the past week, right for days 11–15. Last 24h is measured at the nearest snow station.', tryit: 'Try it — swipe the bars sideways.' },
+  { sel: '.card.rc .scroller', title: 'Snow for the next 10 days', text: 'White bars are snow, blue is a rain/snow mix. Swipe right to see the past 15 days, left for days 11–15. Last 24h is measured at the nearest snow station.', tryit: 'Try it — swipe the bars sideways.' },
   { sel: '.card.rc .star', title: 'Favorites', text: 'Tap the star to keep a mountain in your ★ Favorites list.', tryit: 'Tap it to try — tap again to undo.' },
   { sel: '.homebar .seg-ctl', title: 'Favorites or All', text: 'Flip between your starred mountains and everything on your list. The Edit button next to it adds any resort in the world (or near a ZIP code), reorders or removes mountains.', tryit: 'Tap Favorites or All.' },
   { sel: '.top-actions a[href="#/settings"]', title: 'Powder alerts', text: 'Get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).' },
@@ -1492,13 +1492,14 @@ const strips = () => document.querySelectorAll('[data-strip][data-home]');
   if (el) { stripLeader = el; if (ev !== 'wheel') touching = true; }
 }, { passive: true, capture: true }));
 
-// "Last 24h" is pinned on the left, so swiping toward the forecast never moves it. Swiping back into
-// history pushes it right; on release, if less than half of the past week is showing, it settles home.
+// On release: if more than half of the "Last 24h" box is still in view, settle it back to its spot.
 function settle(el) {
+  const box = el.querySelector('.l24');
+  if (!box) return;
+  const v = el.getBoundingClientRect(), b = box.getBoundingClientRect();
+  const shown = Math.max(0, Math.min(v.right, b.right) - Math.max(v.left, b.left)) / (b.width || 1);
   const home = Number(el.dataset.home);
-  const revealed = home - el.scrollLeft; // px of history pulled into view beyond the resting spot
-  const histW = el.querySelector('.seg.hist')?.offsetWidth || 0;
-  if (revealed > 3 && revealed < histW / 2) el.scrollTo({ left: home, behavior: 'smooth' });
+  if (shown > 0.5 && Math.abs(el.scrollLeft - home) > 3) el.scrollTo({ left: home, behavior: 'smooth' });
 }
 
 document.addEventListener('scroll', (e) => {

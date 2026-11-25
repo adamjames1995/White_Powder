@@ -605,3 +605,6 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 .rc-head .mstatus { flex-wrap: nowrap; overflow: hidden; }
 .rc-head .mstatus .stext { flex: 0 0 auto; max-width: 100%; white-space: normal; }
 .rc-head .mstatus .snote { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Last 24h scrolls with the strip (not pinned) */
+.l24 { position: relative; left: auto; box-shadow: none; }

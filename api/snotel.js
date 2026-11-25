@@ -56,7 +56,7 @@ export default async function handler(req, res) {
   if (!/^\d+:[A-Z]{2}:SNTL$/i.test(triplet)) return res.status(400).json({ error: 'bad triplet' });
   const url = `https://wcc.sc.egov.usda.gov/reportGenerator/view_csv/customSingleStationReport/hourly/${triplet}%7Cid=%22%22%7Cname/-72,0/SNWD::value,WTEQ::value,TOBS::value`;
   try {
-    const dailyUrl = `https://wcc.sc.egov.usda.gov/reportGenerator/view_csv/customSingleStationReport/daily/${triplet}%7Cid=%22%22%7Cname/-14,0/SNWD::value`;
+    const dailyUrl = `https://wcc.sc.egov.usda.gov/reportGenerator/view_csv/customSingleStationReport/daily/${triplet}%7Cid=%22%22%7Cname/-16,0/SNWD::value`;
     const [r, rd] = await Promise.all([fetch(url), fetch(dailyUrl).catch(() => null)]);
     if (!r.ok) throw new Error(`NRCS ${r.status}`);
     const out = parseSnotelCsv(await r.text());

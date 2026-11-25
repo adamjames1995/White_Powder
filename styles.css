@@ -683,3 +683,9 @@ button.cam { border: 0; padding: 0; text-align: left; font: inherit; cursor: poi
 .passchip.ikon { padding: 2px 5px; }
 .passchip.ikon .ikonword { height: 10px; width: auto; display: block; }
 .seg-ctl.views .pass-ikon.on .ikonword { height: 13px; width: auto; display: block; }
+
+/* Epic: white epic wordmark on Epic orange */
+.passchip.epic, .seg-ctl.views .pass-epic.on { background: #ff8c00; }
+.passchip.epic { padding: 2px 5px; }
+.passchip.epic .epicword { height: 11px; width: auto; display: block; }
+.seg-ctl.views .pass-epic.on .epicword { height: 15px; width: auto; display: block; }

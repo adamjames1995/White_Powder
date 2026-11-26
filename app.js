@@ -1828,19 +1828,36 @@ async function waitFor(sel, ms = 12000) {
 }
 const tourResort = () => (shownList().list[0] || RESORTS[0])?.id;
 const TOUR = [
-  { sel: '.levelbar', title: 'Summit, Mid or Base', text: 'Switch every forecast to that elevation. Warm storms can be rain at the base and powder up top.', tryit: 'Pick your favorite now — tap Summit, Mid or Base.' },
-  { sel: '.tabbar [data-tab=ai]', title: 'Powder AI', text: 'On the mountain, start a ski day here: it tracks runs, speed and vertical, shows live lift lines, plans your next lift while you ride up, and connects your ski squad.' },
-  { sel: '.sortpill', title: 'Sort', text: 'Order mountains by closest drive, deepest base, most new snow, or best snow per hour of driving.' },
-  { sel: '.card.rc .mstatus', title: 'Open or closed', text: 'Live from the resort\'s lift feed. The green circle fills with the share of lifts running; closed resorts show their expected opening date.' },
-  { sel: '.card.rc .scroller', title: 'Snow for the next 10 days', text: 'White bars are snow, blue is a rain/snow mix. Swipe right to see the past 15 days, left for days 11–15. Last 24h is measured at the nearest snow station.', tryit: 'Try it — swipe the bars sideways.' },
-  { sel: '.card.rc .star', title: 'Favorites', text: 'Tap the star to keep a mountain in your ★ Favorites list.', tryit: 'Tap it to try — tap again to undo.' },
-  { sel: '.homebar .seg-ctl', title: 'Favorites, Epic or Ikon', text: 'Flip between your favorite mountains and every Epic or Ikon Pass mountain. Swipe a favorite left to remove it. The + button adds any resort in the world (or near a ZIP code) or removes mountains. Press and hold any card to drag it into a new spot.', tryit: 'Tap Epic or Ikon, then back to Favs.' },
-  { sel: '.top-actions a[href="#/settings"]', title: 'Powder alerts', text: 'Get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).' },
-  { route: () => `#/resort/${tourResort()}`, sel: '#tabs', title: 'Tap any mountain', text: 'Its page has everything: snow summary, live cams, weather, trail map, food and the snow report. Tap a tab to jump there.' },
-  { route: () => `#/resort/${tourResort()}`, sel: '.ddlinks', title: 'Day-by-day & hourly', text: 'Open the detailed Day/Night forecast or the hourly view. You can also tap any day in the bars above.' },
-  { route: () => `#/resort/${tourResort()}`, sel: '#sec-cams .camrow', title: 'Live webcams', text: 'Tap a LIVE tile to watch the resort\'s own cam right here.' },
-  { route: () => `#/resort/${tourResort()}`, sel: '#sec-map', title: 'Trail map & food', text: 'The official trail map, an interactive ski map with every run named, then slopeside and in-town food below.' },
-  { route: () => '#/', sel: '.brand', title: 'You\'re all set', text: 'Forecasts refresh on their own; tap ↻ any time. Replay this tour from the bottom of the home screen.' },
+  // Forecast tab
+  { route: () => '#/', sel: '.tabbar', title: 'Three tabs', text: 'Forecast for snow at your mountains, First Tracks to plan the drive, and Powder AI for your day on the hill. This tour walks through all three.' },
+  { route: () => '#/', sel: '.levelbar', title: 'Summit, Mid or Base', text: 'Switch every forecast to that elevation. Warm storms can be rain at the base and powder up top.', tryit: 'Pick one — tap Summit, Mid or Base.' },
+  { route: () => '#/', sel: '.homebar .seg-ctl', title: 'Favorites, Epic or Ikon', text: 'Your favorite mountains, or every mountain on the Epic or Ikon Pass. ☆ on a pass mountain adds it to your favorites.', tryit: 'Tap Epic or Ikon, then back to Favs.' },
+  { route: () => '#/', sel: '.addbtn', title: 'Add or remove mountains', text: 'Search any resort in the world, add the ones near a ZIP code, or reorder your list.' },
+  { route: () => '#/', sel: '.sortpill', title: 'Sort', text: 'Order mountains by closest drive, deepest base, most new snow, or best snow per hour of driving.' },
+  { route: () => '#/', sel: '.card.rc .sub', title: 'At a glance', text: 'Elevation, state, base depth — and what\'s falling right now (Light, Snow, Heavy, Mix or Blizzard).' },
+  { route: () => '#/', sel: '.card.rc .mstatus', title: 'Open or closed', text: 'Live from the resort\'s lift feed. The green circle fills with the share of lifts running; closed resorts show their opening date.' },
+  { route: () => '#/', sel: '.card.rc .scroller', title: 'Snow, past and future', text: 'White bars are snow, blue is a rain/snow mix. Swipe to see the past 15 days or days 11–15 — every card moves together.', tryit: 'Try it — swipe the bars sideways.' },
+  { route: () => '#/', sel: '.swc', title: 'Hold, drag or swipe', text: 'Press and hold a card to drag it into a new spot. Swipe a favorite left to remove it. Pull down anywhere to refresh.' },
+  // Mountain page
+  { route: () => `#/resort/${tourResort()}`, sel: '#tabs', title: 'Tap any mountain', text: 'Its page has the snow summary, live cams, weather, trail map, food and the snow report. Tap a tab to jump there.' },
+  { route: () => `#/resort/${tourResort()}`, sel: '.ddlinks', title: 'Day-by-day & hourly', text: 'Open the detailed Day/Night forecast or the hourly view. You can also tap any day in the bars.' },
+  { route: () => `#/resort/${tourResort()}`, sel: '#status-d', title: 'Lifts & lines', text: 'See every lift\'s status — and live wait times at resorts that publish them — from "Lift lines".' },
+  { route: () => `#/resort/${tourResort()}`, sel: '#sec-cams', title: 'Live webcams', text: 'Tap a cam to watch it right here. Auto-play can be turned on in Settings.' },
+  { route: () => `#/resort/${tourResort()}`, sel: '#sec-map', title: 'Trail map & food', text: 'The official trail map, an interactive ski map with every run named, then slopeside and in-town food.' },
+  // First Tracks
+  { route: () => '#/drive', sel: '.ft-controls', title: 'First Tracks: plan the drive', text: 'Pick the mountain, your starting point, the day and first-chair time. Your vehicle (AWD, snow tires, chains) tailors the chain advice.' },
+  { route: () => '#/drive', sel: '.ft-verdict, #ft-body', wait: 25000, title: 'When to leave', text: 'A leave-by time that works back from first chair, adding live traffic, chain controls and snow on the passes at the hour you\'ll cross them.' },
+  { route: () => '#/drive', sel: '.ft-goals', wait: 4000, title: 'Pick your goal', text: 'First chair, secure parking, avoid the weather or beat traffic — each gives its own leave time, all compared side by side.', tryit: 'Tap Parking or Weather to compare.' },
+  { route: () => '#/drive', sel: '.ft-stay', wait: 1500, title: 'Stay the night?', text: 'When the morning drive looks rough, it suggests staying near the resort, the best time to drive up the evening before, and hotel links.' },
+  { route: () => '#/drive', sel: '.ft-cc, .ft-wx', wait: 4000, title: 'Roads, chains & weather', text: 'Chain controls and closures on your route with advice for your vehicle, pass reports, weather on the drive, and a pack list.' },
+  { route: () => '#/drive', sel: '#ft-map', wait: 4000, title: 'Route options', text: 'Every route on one map. Tap one, then open it in Google Maps (exact route) or Apple Maps.' },
+  { route: () => '#/drive', sel: '.ft-cams', wait: 4000, title: 'Highway cams', text: 'Live highway cameras along the way — tap one to enlarge.' },
+  // Powder AI
+  { route: () => '#/ai', sel: '.ai-start', title: 'Powder AI: your ski day', text: 'Start a day on the mountain: a 3D map tracks runs, speed and vertical, shows live lift lines, plans your next run and lift while you ride up, and shares it with your ski squad.' },
+  { route: () => '#/ai', sel: '#ai-code, .code', title: 'Ski squad', text: 'Create a squad or join with a friend\'s 4-letter code to see each other on the map.' },
+  // Settings
+  { route: () => '#/', sel: '.top-actions a[href="#/settings"]', title: 'Settings', text: 'Light or dark mode, your vehicle, cam auto-play, and powder alerts when a big snow day is coming.' },
+  { route: () => '#/', sel: '.brand', title: 'You\'re all set', text: 'Forecasts refresh on their own; pull down any time. Replay this tour from the bottom of the home screen.' },
 ];
 
 function startTour(intro = '') {
@@ -1878,7 +1895,8 @@ function startTour(intro = '') {
     const want = st.route ? st.route() : '#/';
     const here = location.hash || '#/';
     if (want && here !== want) { location.hash = want; await sleep(350); }
-    const el = await waitFor(st.sel);
+    if (!document.querySelector(st.sel)) { await sleep(600); if (!document.querySelector(st.sel) && (location.hash || '#/') === want) safeRender(); }
+    const el = await waitFor(st.sel, st.wait || 12000);
     if (!alive) return;
     if (!el) { if (i < TOUR.length - 1) { i++; return show(); } return finish(); }
     el.scrollIntoView({ block: 'center' });

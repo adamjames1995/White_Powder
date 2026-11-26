@@ -344,20 +344,56 @@ async function ensureDrive(list) {
   if (location.hash.length <= 2) renderHome();
 }
 
-async function askHome() {
-  const viaGps = () => new Promise((res) => {
-    if (!navigator.geolocation) return res(null);
-    navigator.geolocation.getCurrentPosition((p) => res({ lat: p.coords.latitude, lon: p.coords.longitude, label: 'your location' }), () => res(null), { timeout: 10000, maximumAge: 600000 });
+// Starting point picker: type an address, town or ZIP (with suggestions), or use the phone's location.
+async function addressSearch(q, near) {
+  const u = new URLSearchParams({ q, limit: '6', lang: 'en' });
+  if (near) { u.set('lat', near.lat); u.set('lon', near.lon); }
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const j = await (await fetch(`https://photon.komoot.io/api/?${u}`, { signal: ctrl.signal })).json();
+    return (j.features || []).map((f) => {
+      const p = f.properties || {}, [lon, lat] = f.geometry.coordinates;
+      const line1 = [p.housenumber, p.street].filter(Boolean).join(' ') || p.name || '';
+      const line2 = [p.city || p.town || p.village || p.county, p.state, p.postcode].filter(Boolean).join(', ');
+      return { lat, lon, label: [line1, p.city || p.town || p.village].filter(Boolean).join(', ') || line2, line1: line1 || line2, line2: line1 ? line2 : (p.country || '') };
+    }).filter((x) => x.label);
+  } catch { return []; } finally { clearTimeout(t); }
+}
+function askHome() {
+  return new Promise((resolve) => {
+    const cur = getHome();
+    const m = modal(`<div class="cam-h"><b>Starting point</b><button class="circ sm" id="sp-x" aria-label="Close">✕</button></div>
+      <input id="sp-q" class="sp-input" type="search" inputmode="search" autocomplete="street-address" placeholder="Address, town or ZIP" value="" />
+      <button class="btn sp-gps" id="sp-gps">📍 Use my current location</button>
+      <div id="sp-res" class="sp-res">${cur ? `<p class="small muted">Now: ${esc(cur.label)}</p>` : ''}</div>`);
+    const input = m.querySelector('#sp-q'), res = m.querySelector('#sp-res');
+    let done = false, timer = 0, seq = 0;
+    const finish = (h) => { if (done) return; done = true; m.remove(); if (h) setHome({ lat: h.lat, lon: h.lon, label: h.label }); resolve(h || null); };
+    m.querySelector('#sp-x').onclick = () => finish(null);
+    m.addEventListener('click', (e) => { if (e.target === m) finish(null); });
+    setTimeout(() => input.focus(), 50);
+    const show = (items, msg) => {
+      res.innerHTML = items.length ? items.map((x, k) => `<button class="sp-item" data-k="${k}"><b>${esc(x.line1)}</b><span class="small muted">${esc(x.line2 || '')}</span></button>`).join('') : `<p class="small muted">${esc(msg || 'No matches yet — try adding the city or ZIP.')}</p>`;
+      res.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', () => finish(items[Number(b.dataset.k)])));
+    };
+    const search = async () => {
+      const q = input.value.trim(); if (q.length < 3) { res.innerHTML = ''; return; }
+      const my = ++seq;
+      let items = await addressSearch(q, cur);
+      if (!items.length) { const z = await locate(q).catch(() => null); if (z) items = [{ ...z, line1: z.label, line2: '' }]; }
+      if (my === seq) show(items);
+    };
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 300); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(timer); search(); } });
+    m.querySelector('#sp-gps').onclick = () => {
+      if (!navigator.geolocation) return show([], 'Location isn\'t available on this device.');
+      res.innerHTML = '<p class="small muted">Finding you…</p>';
+      navigator.geolocation.getCurrentPosition(
+        (p) => finish({ lat: p.coords.latitude, lon: p.coords.longitude, label: 'your location' }),
+        () => show([], 'Couldn\'t get your location — allow it in Settings, or type an address.'),
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+    };
   });
-  let h = await viaGps();
-  if (!h) {
-    const q = prompt('Where are you starting from? Enter a ZIP code or town.');
-    if (!q) return null;
-    h = await locate(q).catch(() => null);
-    if (!h) { alert('Couldn\'t find that place.'); return null; }
-  }
-  setHome({ lat: h.lat, lon: h.lon, label: h.label });
-  return h;
 }
 
 // Re-sort when depths / snow reports / drive times arrive (debounced, never mid-gesture).

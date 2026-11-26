@@ -867,3 +867,8 @@ html[data-theme="light"] .tabbar a.on { color: #111; background: rgba(255,255,25
 .topbar { position: fixed; top: 0; left: 0; right: 0; background: #161615; }
 html[data-theme="light"] .topbar { background: #161615; }
 body:not(.detail) { padding-top: var(--tb-h, 0px); }
+
+.sp-input { width: 100%; font: inherit; font-size: 16px; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); margin: 8px 0; }
+.sp-gps { width: 100%; margin-bottom: 6px; }
+.sp-res { max-height: 45vh; overflow: auto; }
+.sp-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--border); color: var(--text-primary); padding: 10px 2px; }

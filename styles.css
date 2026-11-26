@@ -964,11 +964,7 @@ html[data-theme="light"] .av-tabs button.on, html[data-theme="light"] .av-chips 
 .av3d-rig { position: absolute; inset: 0; transform-style: preserve-3d; transform-origin: 50% 92%; }
 .av3d-l { position: absolute; left: 0; top: 0; width: 150px; height: 168px; transform-style: preserve-3d; }
 .av3d-l svg, .av3d-gear svg { width: 100%; height: 100%; display: block; overflow: visible; }
-.av3d-l.back { transform: translateZ(-14px); }
-.av3d-l.legs { transform: translateZ(0); }
-.av3d-l.body { transform: translateZ(4px); }
-.av3d-l.head { transform: translateZ(9px); transform-origin: 50% 30%; }
-.av3d-l.arms { transform: translateZ(14px); }
+.av3d-l.head { transform-origin: 50% 30%; }
 .av3d-gear { position: absolute; left: -12px; top: 117px; width: 174px; height: 70px; transform: rotateX(86deg) rotateZ(90deg) scale(.95); transform-origin: 50% 50%; }
 .av3d-rig.board .av3d-gear { transform: rotateX(86deg) rotateZ(0deg); }
 .av3d-shadow { position: absolute; left: 15px; right: 15px; top: 140px; height: 24px; border-radius: 50%; background: radial-gradient(rgba(0,40,80,.35), transparent 70%); transform: rotateX(86deg); }
@@ -983,9 +979,9 @@ html[data-theme="light"] .av-tabs button.on, html[data-theme="light"] .av-chips 
 .av3d-hint { position: absolute; left: 12px; top: 13px; font-size: 11px; color: rgba(0,30,60,.55); font-weight: 600; }
 @keyframes av3dsnow { to { transform: translate(-30px, 270px); } }
 @keyframes av3dcarve { 0%,100% { transform: translateX(-16px) rotateZ(7deg) rotateY(-14deg); } 50% { transform: translateX(16px) rotateZ(-7deg) rotateY(14deg); } }
-@keyframes av3dpole { 0%,100% { transform: translateZ(14px) rotateZ(0); } 50% { transform: translateZ(14px) rotateZ(-3deg) translateY(2px); } }
+@keyframes av3dpole { 0%,100% { transform: rotateZ(0); } 50% { transform: rotateZ(-3deg) translateY(2px); } }
 @keyframes av3drock { 0%,100% { transform: rotateX(8deg) rotateY(-24deg) translateY(0); } 40% { transform: rotateX(-8deg) rotateY(24deg) translateY(0); } 70% { transform: rotateX(0) rotateY(10deg) translateY(-18px) rotateZ(-6deg); } 80% { transform: rotateY(6deg) translateY(0); } }
-@keyframes av3dnod { 0%,100% { transform: translateZ(9px) rotateZ(0); } 50% { transform: translateZ(9px) rotateZ(-3deg); } }
+@keyframes av3dnod { 0%,100% { transform: rotateZ(0); } 50% { transform: rotateZ(-3deg); } }
 @keyframes av3dhelicopter { 0% { transform: translateY(0) rotateY(0); } 15% { transform: translateY(6px) rotateY(0) scaleY(.94); } 55% { transform: translateY(-70px) rotateY(220deg); } 90% { transform: translateY(0) rotateY(360deg); } 95% { transform: translateY(4px) rotateY(360deg) scaleY(.94); } 100% { transform: translateY(0) rotateY(360deg); } }
 @keyframes av3dflip { 0% { transform: translateY(0) rotateX(0) rotateY(0); } 15% { transform: translateY(6px) scaleY(.94); } 50% { transform: translateY(-80px) rotateY(180deg) rotateZ(-20deg); } 85% { transform: translateY(0) rotateY(360deg) rotateZ(0); } 100% { transform: translateY(0) rotateY(360deg); } }
 @media (prefers-reduced-motion: reduce) { .av3d-rig, .av3d-l, .av3d-snow i, .av-bob { animation: none !important; } }
@@ -1007,3 +1003,29 @@ html[data-theme="light"] .av-tabs button.on, html[data-theme="light"] .av-chips 
 .av3d-snow i:nth-child(16) { left: 95%; animation-duration: 3s; animation-delay: -3.5s; }
 .av3d-snow i:nth-child(17) { left: 48%; animation-duration: 5s; animation-delay: -0.8s; }
 .av3d-snow i:nth-child(18) { left: 1%; animation-duration: 7s; animation-delay: -2.1s; }
+/* ---------- holiday props ---------- */
+.av-hol-banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; margin: 0 0 6px; padding: 10px 12px; border-radius: 12px; border: 0; color: #fff; font-weight: 700; font-size: 14px; text-align: left;
+  background: linear-gradient(100deg, #ff8c00, #ff3d7f, #7b2ff7); background-size: 200% 100%; animation: holshine 4s ease-in-out infinite; }
+.av-hol-banner span { font-weight: 600; opacity: .9; white-space: nowrap; }
+@keyframes holshine { 0%,100% { background-position: 0 0; } 50% { background-position: 100% 0; } }
+.av-holiday { margin: 6px 0 12px; padding: 10px; border-radius: 14px; background: linear-gradient(135deg, rgba(255,140,0,.16), rgba(123,47,247,.16)); border: 1px solid rgba(255,140,0,.35); }
+.av-hol-h { margin-bottom: 8px; font-size: 14px; } .av-hol-h span { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; opacity: .7; margin-left: 4px; }
+.av-chips button.hol { border-color: rgba(255,140,0,.6); box-shadow: 0 0 10px rgba(255,140,0,.25); }
+.av-chips button.hol.on { background: linear-gradient(100deg, #ff8c00, #ff3d7f); color: #fff; border-color: transparent; }
+.av-past { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted, #9a9a9a); }
+.hol-promo { position: fixed; left: 12px; right: 12px; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 60; display: flex; gap: 12px; align-items: center; padding: 12px;
+  border-radius: 20px; color: #fff; background: linear-gradient(120deg, rgba(40,20,60,.92), rgba(90,30,40,.92)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 12px 40px rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.12); transform: translateY(140%); opacity: 0; transition: transform .45s cubic-bezier(.2,.9,.2,1.15), opacity .3s; }
+.hol-promo.in { transform: none; opacity: 1; }
+.hol-promo-av { flex: none; }
+.hol-promo-txt { display: flex; flex-direction: column; gap: 4px; font-size: 13px; } .hol-promo-txt b { font-size: 16px; }
+.hol-promo-btns { display: flex; gap: 8px; margin-top: 4px; }
+.spark { animation: spark .3s steps(2) infinite; transform-box: fill-box; }
+@keyframes spark { 50% { opacity: .5; } }
+
+/* extruded slices give the rider real thickness */
+.av3d-s { position: absolute; inset: 0; transform-style: preserve-3d; backface-visibility: visible; }
+.av3d-s svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.av3d-s:not(.face) svg { filter: brightness(.6) saturate(.9); }
+.av3d-side { position: absolute; left: 50%; transform-style: preserve-3d; }
+.av3d-side svg { width: 100%; height: 100%; display: block; }

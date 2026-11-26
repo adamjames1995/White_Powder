@@ -1,6 +1,6 @@
 import { loadSkiArea, dist } from '/lib/skiarea.js';
 import { DayTracker } from '/lib/track.js';
-import { AV, ACC, DEFAULT_AV, randomAvatar, encodeAv, decodeAv, normAv, avatarSvg, avatar3d, avTitle, avMove, avGnar, avRide } from '/lib/avatar.js';
+import { AV, ACC, HOLIDAY_ACC, holidaysOn, accLabel, DEFAULT_AV, randomAvatar, encodeAv, decodeAv, normAv, avatarSvg, avatar3d, avTitle, avMove, avGnar, avRide } from '/lib/avatar.js';
 import { plan, feedFor, LEVELS as AI_LEVELS, SNOW } from '/lib/plan.js';
 import { stayAdvice, hotelLinks, GOALS, VEHICLE_DEFAULT, chainLevel, chainAdvice, passAdvice, pickLeave, powderPick, packList, sampleRoute, googleMapsUrl, appleMapsUrl, fmtDur } from '/lib/drive.js';
 import { CATALOG, logoUrl, openingFor, passOf, PASSES, slug, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
@@ -1853,6 +1853,22 @@ const TUTORIAL = [
   ['⚙️', 'Settings & powder alerts', 'Tap the gear to switch light/dark mode or get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).'],
 ];
 
+function holidayPromo() {
+  if (!localStorage.getItem(ONBOARD_KEY)) return; // first run has its own rider prompt
+  const h = holidaysOn(new Date(), aiMe().bday)[0]; if (!h) return;
+  const key = `wp:holpromo:${h.key}:${h.year}`; if (localStorage.getItem(key)) return;
+  try { localStorage.setItem(key, '1'); } catch {}
+  const base = normAv(myAv() || randomAvatar()), demo = { ...base, acc: [...new Set([...base.acc, ...h.props])] };
+  const el = document.createElement('div'); el.className = 'hol-promo';
+  el.innerHTML = `<div class="hol-promo-av">${avatarSvg(demo, { size: 74, cls: 'av-bob' })}</div><div class="hol-promo-txt"><b>${h.emoji} ${esc(h.name)}!</b>
+    <span>Limited-time props: ${h.props.map((k) => esc(accLabel(k))).join(', ')}. Dress up your rider.</span>
+    <div class="hol-promo-btns"><button class="btn primary sm" id="hp-go">Try them on</button><button class="btn sm" id="hp-x">Later</button></div></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('in'));
+  const close = () => { el.classList.remove('in'); setTimeout(() => el.remove(), 300); };
+  el.querySelector('#hp-x').onclick = close;
+  el.querySelector('#hp-go').onclick = () => { close(); openAvatarBuilder(() => { if (location.hash.startsWith('#/ai')) renderAI(); }, 'acc'); };
+}
+
 function showTutorial(intro = '') {
   // First run only: offer the rider builder before the tour (skippable).
   if (!localStorage.getItem(ONBOARD_KEY) && !myAv() && !sessionStorage.getItem('wp:rider-asked')) {
@@ -1935,7 +1951,7 @@ const TOUR = [
   { route: () => '#/drive', sel: '.ft-cams', wait: 4000, title: 'Highway cams', text: 'Live highway cameras along the way — tap one to enlarge.' },
   // Powder AI
   { route: () => '#/ai', sel: '.ai-start', title: 'Powder AI: your ski day', text: 'Start a day on the mountain: a 3D map tracks runs, speed and vertical, shows live lift lines, plans your next run and lift while you ride up, and shares it with your ski squad.' },
-  { route: () => '#/ai', sel: '#ai-me-av', title: 'Build your rider', text: 'Make your skier or snowboarder and spin them in 3D: helmets, goggles, outfits, unlimited add-ons, and your own title and signature move ("Après All Day", anyone?). Your squad sees your rider on the live map.', tryit: 'Tap it to open the builder. You can also find it in Settings.' },
+  { route: () => '#/ai', sel: '#ai-me-av', title: 'Build your rider', text: 'Make your skier or snowboarder and spin them in 3D: build (yes, weight too), helmets, goggles, outfits, unlimited add-ons, holiday props, and your own title and signature move ("Après All Day", anyone?). Your squad sees your rider on the live map.', tryit: 'Tap it to open the builder. You can also find it in Settings.' },
   { route: () => '#/ai', sel: '#ai-code, .code', title: 'Ski squad', text: 'Create a squad or join with a friend\'s 4-letter code to see each other on the map.' },
   // Settings
   { route: () => '#/', sel: '.top-actions a[href="#/settings"]', title: 'Settings', text: 'Light or dark mode, your vehicle, cam auto-play, and powder alerts when a big snow day is coming.' },
@@ -2047,7 +2063,7 @@ function renderAI() {
     </section>
     <section class="card pad stack">
       <h3 style="margin:0">Ski squad</h3>
-      <div id="ai-me-av" class="ai-me-av">${myAv() ? `${riderCard(myAv(), me.name)}<button class="btn sm" id="ai-av-edit">Edit rider</button>` : `<button class="av-cta" id="ai-av-edit">${avatarSvg(DEFAULT_AV, { size: 56, mode: 'badge' })}<span><b>Build your rider</b><span class="small muted">Pick your gear, flair and a title your friends will roast you for.</span></span><span class="chev">›</span></button>`}</div>
+      <div id="ai-me-av" class="ai-me-av">${myAv() ? `${riderCard(myAv(), me.name)}<button class="btn sm" id="ai-av-edit">${holidaysOn(new Date(), me.bday)[0] ? `${holidaysOn(new Date(), me.bday)[0].emoji} New props` : 'Edit rider'}</button>` : `<button class="av-cta" id="ai-av-edit">${avatarSvg(DEFAULT_AV, { size: 56, mode: 'badge' })}<span><b>Build your rider</b><span class="small muted">Pick your gear, flair and a title your friends will roast you for.</span></span><span class="chev">›</span></button>`}</div>
       <label class="ai-lbl">Your name <input id="ai-name" maxlength="20" value="${esc(me.name)}" placeholder="e.g. Adam" /></label>
       ${me.squad ? `<p>In squad <b class="code">${esc(me.squad)}</b> · <button class="linkbtn" id="ai-leave">Leave</button></p>` : `
       <div class="ai-row"><button class="btn" id="ai-create">Create squad</button><input id="ai-code" maxlength="4" placeholder="CODE" autocapitalize="characters" /><button class="btn" id="ai-join">Join</button></div>`}
@@ -2463,32 +2479,40 @@ function mountViewer(host, a) {
   });
   set();
 }
-function openAvatarBuilder(onDone) {
+function openAvatarBuilder(onDone, startTab = 'ride') {
   let a = normAv(myAv() || randomAvatar());
   const me = aiMe();
-  let tab = 'ride';
+  let tab = startTab;
   const sw = (k, colors) => `<div class="av-sw" data-k="${k}">${colors.map((c, i) => `<button style="--c:${Array.isArray(c) ? `linear-gradient(135deg,${c[0]},${c[1]})` : c}" data-i="${i}" aria-label="${k} ${i + 1}"></button>`).join('')}</div>`;
   const chips = (k, list) => `<div class="av-chips wrap" data-k="${k}">${list.map((t, i) => `<button data-i="${i}">${esc(Array.isArray(t) ? t[1] : t)}</button>`).join('')}</div>`;
   const sec = (h, inner) => `<div class="av-sec"><h4>${h}</h4>${inner}</div>`;
   const TABS = {
-    ride: ['Ride', () => sec('I ride', chips('ride', AV.ride)) + sec('Skin', sw('skin', AV.skin)) + sec(`${a.ride === 1 ? 'Board' : 'Skis'} & helmet color`, sw('helmet', AV.color))
+    ride: ['Ride', () => sec('I ride', chips('ride', AV.ride)) + sec('Build (no judgment)', chips('build', AV.build)) + sec('Skin', sw('skin', AV.skin)) + sec(`${a.ride === 1 ? 'Board' : 'Skis'} & helmet color`, sw('helmet', AV.color))
       + `<label class="opt"><input type="checkbox" data-acc="stickers" ${a.acc.includes('stickers') ? 'checked' : ''}/> Sticker-bomb my ${a.ride === 1 ? 'board' : 'skis'} and helmet</label>`],
     head: ['Head', () => sec('Helmet / hat', chips('helmStyle', AV.helmStyle)) + sec('Eyewear', chips('eyewear', AV.eyewear)) + sec('Lens', sw('lens', AV.lens.map((l) => [l[0], l[1]])))],
     fit: ['Outfit', () => sec('Jacket', chips('jacketStyle', AV.jacketStyle)) + sec('Jacket color', sw('jacket', AV.color)) + sec('Accent color (stripes, hoods, packs, scarves)', sw('accent', AV.color))
       + sec('Pants', chips('pantsStyle', AV.pantsStyle)) + (a.jacketStyle === 2 ? '' : sec('Pants color', sw('pants', AV.color))) + sec('Gloves', sw('gloves', AV.color))],
-    acc: ['Add-ons', () => `<p class="small muted" style="margin:4px 0 8px">Pile on as many as you want — tap again to remove.</p><div class="av-chips wrap">${ACC.map(([k, l]) => `<button data-acc="${k}" class="${a.acc.includes(k) ? 'on' : ''}">${a.acc.includes(k) ? '✓ ' : '+ '}${esc(l)}</button>`).join('')}</div>`
+    acc: ['Add-ons', () => holidayChips() + `<p class="small muted" style="margin:4px 0 8px">Pile on as many as you want — tap again to remove.</p><div class="av-chips wrap">${ACC.map(([k, l]) => `<button data-acc="${k}" class="${a.acc.includes(k) ? 'on' : ''}">${a.acc.includes(k) ? '✓ ' : '+ '}${esc(l)}</button>`).join('')}</div>`
+      + (a.acc.filter((k) => !ACC.some((x) => x[0] === k) && !hol.some((h) => h.props.includes(k))).length ? `<h4 class="av-past">Holiday props you're wearing</h4><div class="av-chips wrap">${a.acc.filter((k) => !ACC.some((x) => x[0] === k) && !hol.some((h) => h.props.includes(k))).map((k) => `<button data-acc="${k}" class="on">✓ ${esc(accLabel(k))}</button>`).join('')}</div>` : '')
       + (a.acc.length ? `<button class="linkbtn" id="av-clear" style="margin-top:8px">Remove all add-ons</button>` : '')],
     me: ['Persona', () => sec('Your name', `<input id="av-name" maxlength="20" placeholder="Your name" value="${esc(aiMe().name || '')}" />`)
       + sec('Title', `<input id="av-title" maxlength="32" value="${esc(a.title)}" placeholder="Write your own title"/>${chipsTxt('title', AV.title)}`)
       + sec('Signature move', `<input id="av-move" maxlength="32" value="${esc(a.move)}" placeholder="Write your own move"/>${chipsTxt('move', AV.move)}`)
+      + sec('Birthday (for birthday props 🎂)', `<input id="av-bday" type="date" value="${aiMe().bday ? `2000-${aiMe().bday}` : ''}"/>`)
       + sec('Gnar level', `<input type="range" id="av-gnar" min="0" max="${AV.gnar.length - 1}" value="${a.gnar}"/><div class="small muted" id="av-gnar-l">${esc(avGnar(a))}</div>`)],
   };
+  const hol = holidaysOn(new Date(), aiMe().bday);
+  function holidayChips() {
+    return hol.map((h) => `<div class="av-holiday"><div class="av-hol-h">${h.emoji} <b>${esc(h.name)}</b> <span>limited-time props</span></div>
+      <div class="av-chips wrap">${h.props.map((k) => `<button data-acc="${k}" class="hol ${a.acc.includes(k) ? 'on' : ''}">${a.acc.includes(k) ? '✓ ' : '+ '}${esc(accLabel(k))}</button>`).join('')}</div></div>`).join('');
+  }
   function chipsTxt(k, list) { return `<div class="av-chips" data-txt="${k}">${list.map((t) => `<button data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>`; }
   const m = modal(`<div class="av-build">
     <div class="cam-h"><b>Build your rider</b><button class="circ sm" id="av-x" aria-label="Close">✕</button></div>
     <div id="av-view"></div>
     <div class="av-id"><b id="av-n"></b><span class="rider-title" id="av-t"></span><span class="small muted" id="av-mv"></span></div>
     <div class="av-roast small" id="av-roast"></div>
+    ${hol.length ? `<button class="av-hol-banner" id="av-hol">${hol.map((h) => h.emoji).join(' ')} ${esc(hol[0].name)}! Holiday props are here <span>Try them ›</span></button>` : ''}
     <div class="av-tabs">${Object.entries(TABS).map(([k, [l]]) => `<button data-tab="${k}">${l}</button>`).join('')}<button id="av-dice" title="Shuffle">🎲</button></div>
     <div id="av-panel"></div>
     <button class="btn primary" id="av-save" style="width:100%;margin-top:10px">Save rider</button>
@@ -2525,9 +2549,11 @@ function openAvatarBuilder(onDone) {
       inp?.addEventListener('input', () => { a = { ...a, [k]: inp.value }; m.querySelector(k === 'title' ? '#av-t' : '#av-mv').textContent = k === 'title' ? inp.value : `Signature move: ${inp.value}`; m.querySelector('#av-roast').textContent = roast(normAv(a), pendingName); });
       p.querySelectorAll(`[data-txt="${k}"] button`).forEach((b) => b.addEventListener('click', () => { a = { ...a, [k]: b.dataset.t }; inp.value = b.dataset.t; refresh(false); }));
     }
+    p.querySelector('#av-bday')?.addEventListener('change', (e) => { const v = e.target.value; setAiMe({ bday: v ? v.slice(5) : '' }); });
     p.querySelector('#av-gnar')?.addEventListener('input', (e) => { a = { ...a, gnar: Number(e.target.value) }; p.querySelector('#av-gnar-l').textContent = avGnar(a); });
   }
   m.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; refresh(true); }));
+  m.querySelector('#av-hol')?.addEventListener('click', () => { tab = 'acc'; refresh(true); m.querySelector('.av-holiday')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); });
   m.querySelector('#av-dice').addEventListener('click', () => {
     const keep = { title: a.title, move: a.move }; a = { ...randomAvatar() };
     if (tab === 'me') Object.assign(a, keep); // don't wipe text you're typing
@@ -3218,3 +3244,4 @@ loadCached();
 safeRender();
 refresh();
 setTimeout(() => (localStorage.getItem(ONBOARD_KEY) ? maybeShowDonate() : maybeShowDonate(() => startOnboarding())), 700);
+setTimeout(() => { if (!document.querySelector('.modal')) holidayPromo(); }, 2600);

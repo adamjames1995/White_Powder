@@ -41,8 +41,29 @@ export const coerce = (s) => {
   return 'scheduled';
 };
 
+const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+
+/** A run/trail object from either feed → { name, difficulty, open, groomed } (fields vary by resort). */
+export function toRun(o) {
+  if (!o || typeof o !== 'object' || !o.Name) return null;
+  const keys = Object.keys(o);
+  const gk = keys.find((k) => /groom/i.test(k));
+  const gv = gk ? o[gk] : null;
+  const groomed = gv == null ? null : typeof gv === 'string' ? /^(y|yes|true|groomed|1)$/i.test(gv.trim()) || /groomed/i.test(gv) && !/not/i.test(gv) : !!gv;
+  const ok = keys.find((k) => /^(isopen|open|status|statusenglish)$/i.test(k));
+  const open = ok == null ? null : coerce(o[ok]) === 'open';
+  const dk = keys.find((k) => /difficulty|trailtype|^type$|level|rating/i.test(k));
+  return { name: String(o.Name).trim(), difficulty: dk ? String(o[dk] ?? '') : '', open, groomed };
+}
+
 export function fromMtnpowder(arr) {
-  return (Array.isArray(arr) ? arr : []).map((l) => ({ name: String(l.Name || '').trim(), raw: String(l.StatusEnglish || l.Status || '').trim(), status: coerce(l.StatusEnglish || l.Status) }));
+  const list = (Array.isArray(arr) ? arr : []).map((l) => ({
+    name: String(l.Name || '').trim(), raw: String(l.StatusEnglish || l.Status || '').trim(), status: coerce(l.StatusEnglish || l.Status),
+    wait: l.WaitTimeStatus === 0 || l.WaitTime != null ? num(l.WaitTime) : null, type: l.LiftType || '',
+  }));
+  list.runsRaw = (Array.isArray(arr) ? arr : []).flatMap((l) => (Array.isArray(l.Trails) ? l.Trails : []));
+  list.runs = list.runsRaw.map(toRun).filter(Boolean);
+  return list;
 }
 
 const VAIL = ['closed', 'open', 'hold', 'scheduled'];
@@ -62,7 +83,10 @@ export function fromVailHtml(html) {
   const add = (l) => { const k = l.Id ?? l.Name; if (k == null) return; const prev = seen.get(k); if (!prev || (prev.Status !== 1 && l.Status === 1)) seen.set(k, l); };
   (f.Lifts || []).forEach(add);
   (f.GroomingAreas || []).forEach((a) => (a.Lifts || []).forEach(add));
-  const lifts = [...seen.values()].map((l) => ({ name: String(l.Name || '').trim(), raw: VAIL[l.Status] || String(l.Status), status: VAIL[l.Status] || 'scheduled' }));
+  const lifts = [...seen.values()].map((l) => ({ name: String(l.Name || '').trim(), raw: VAIL[l.Status] || String(l.Status), status: VAIL[l.Status] || 'scheduled', wait: num(l.WaitTimeInMinutes), type: l.Type ?? '' }));
+  lifts.runsRaw = (f.GroomingAreas || []).flatMap((a) => [...(a.Runs || []), ...(a.Trails || [])]);
+  lifts.runs = lifts.runsRaw.map(toRun).filter(Boolean);
+  lifts.areaKeys = [...new Set((f.GroomingAreas || []).flatMap((a) => Object.keys(a)))];
   const m = html.match(/(\d+)\s*(?:<[^>]+>\s*)*\/\s*(?:<[^>]+>\s*)*(\d+)(?:\s*<[^>]+>)*\s*Lifts\s*Open/i);
   if (m) lifts.pageCount = { open: Number(m[1]), total: Number(m[2]) };
   return lifts;
@@ -95,7 +119,12 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
     const sum = summarize(lifts);
     if (feed.totalLifts && sum.total < feed.totalLifts) { sum.closed += feed.totalLifts - sum.total; sum.total = feed.totalLifts; }
-    res.status(200).json({ found: true, id, url: feed.page || feed.url, ...sum, source: 'resort lift-status feed', fetchedAt: new Date().toISOString() });
+    // Per-lift detail (wait times where the resort publishes them) and runs with grooming, for Powder AI.
+    const seenRun = new Set();
+    const runs = (lifts.runs || []).filter((x) => !seenRun.has(x.name) && seenRun.add(x.name)).slice(0, 400);
+    const liftList = lifts.filter((l, i, a) => a.findIndex((x) => x.name === l.name) === i).map(({ name, status, wait }) => ({ name, status, wait }));
+    res.status(200).json({ found: true, id, url: feed.page || feed.url, ...sum, lifts: liftList, runs, hasWaits: liftList.some((l) => l.wait != null), source: 'resort lift-status feed', fetchedAt: new Date().toISOString(),
+      ...(req.query.debug === 'runs' ? { runKeys: [...new Set((lifts.runsRaw || []).flatMap((o) => Object.keys(o)))], areaKeys: lifts.areaKeys, sample: (lifts.runsRaw || []).slice(0, 2) } : {}) });
   } catch (e) {
     res.status(req.query.debug ? 200 : 502).json({ error: e.message || String(e), url: feed.page || feed.url });
   }

@@ -1884,7 +1884,22 @@ const HOL_LINE = {
 const HOL_FX = { thanksgiving: '🍂', christmas: '❄️', newyear: '🎉', valentine: '💘', stpat: '☘️', easter: '🥚', halloween: '🎃', july4: '🎆', groundhog: '🦫', mardigras: '🎭', aprilfools: '🤡', birthday: '🎈' };
 const holToday = () => { try { return holidaysOn(new Date(), aiMe().bday)[0] || null; } catch { return null; } };
 const holKey = () => { const h = holToday(); return h ? `wp:holbanner:${h.key}:${new Date().toDateString()}` : ''; };
+// Little decorations tucked around the White Powder logo: [on the mark, after the wordmark, by the tagline]
+const HOL_DECOR = {
+  thanksgiving: ['🍂', '🦃', '🥧'], christmas: ['🎅', '🎄', '🎁'], newyear: ['🥳', '🎆', '✨'], valentine: ['💘', '💝', '🌹'], stpat: ['☘️', '🌈', '🍀'],
+  easter: ['🐰', '🐣', '🥚'], halloween: ['🎃', '👻', '🦇'], july4: ['🇺🇸', '🎆', '✨'], groundhog: ['🦫', '☀️', '🌨️'], mardigras: ['🎭', '🎺', '⚜️'],
+  aprilfools: ['🤡', '🙃', '🎈'], birthday: ['🎉', '🎂', '🎈'],
+};
+function logoDecor() {
+  const brand = document.querySelector('.topbar .brand'); if (!brand) return;
+  brand.querySelectorAll('.logo-hol').forEach((e) => e.remove());
+  const h = holToday(); if (!h) return;
+  const [a, b, c] = HOL_DECOR[h.key] || [h.emoji, h.emoji, '✨'];
+  brand.insertAdjacentHTML('beforeend', `<span class="logo-hol d1" aria-hidden="true">${a}</span><span class="logo-hol d2" aria-hidden="true">${b}</span><span class="logo-hol d3" aria-hidden="true">${c}</span>`);
+  brand.title = `${h.name}!`;
+}
 function holidayBanner() {
+  return ''; // replaced by logo decorations (logoDecor) + falling emoji
   const h = holToday(); if (!h || localStorage.getItem(holKey())) return '';
   const title = h.key === 'birthday' ? `Happy birthday${aiMe().name ? `, ${esc(aiMe().name)}` : ''}!` : `${esc(h.name.replace(/^Happy /, 'Happy '))}${/!$/.test(h.name) ? '' : '!'}`;
   return `<div class="hol-banner hol-${h.key}"><span class="hol-emoji">${h.emoji}</span><div class="hol-txt"><b>${title}</b><span>${esc(HOL_LINE[h.key] || '')}</span></div>
@@ -1893,6 +1908,7 @@ function holidayBanner() {
 function holidayDecor() {
   const h = holToday();
   document.documentElement.dataset.holiday = h ? h.key : '';
+  logoDecor();
   if (!h || sessionStorage.getItem('wp:holfx') === h.key) return;
   try { sessionStorage.setItem('wp:holfx', h.key); } catch {}
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;

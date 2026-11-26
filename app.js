@@ -2291,7 +2291,7 @@ async function planDrive(dest, dayOffset, chair) {
       const base = await getJSON(`/api/firsttracks?flat=${from[0]}&flon=${from[1]}&tlat=${to[0]}&tlon=${to[1]}`);
       const chairMs = dayStart + hh * 3600e3 + mm * 60e3;
       const departs = [];
-      if (base.traffic) for (let k = 0; k < 7; k++) { const t = chairMs - 30 * 60e3 - base.routes[0].min * 60e3 - (90 - k * 30) * 60e3; if (t > Date.now()) departs.push(new Date(Math.round(t / 900e3) * 900e3).toISOString().slice(0, 19)); }
+      if (base.traffic) for (let k = 0; k < 7; k++) { const t = chairMs - 30 * 60e3 - base.routes[0].min * 60e3 - (90 - k * 30) * 60e3; if (t > Date.now()) { const dt = new Date(Math.round(t / 900e3) * 900e3); departs.push(new Date(dt.getTime() - dt.getTimezoneOffset() * 60e3).toISOString().slice(0, 19)); } } // local wall-clock time (TomTom reads it as the origin's time zone)
       const times = departs.length ? (await getJSON(`/api/firsttracks?flat=${from[0]}&flon=${from[1]}&tlat=${to[0]}&tlon=${to[1]}&departs=${departs.join(',')}`).catch(() => ({ times: [] }))).times : [];
       const pts = sampleRoute(base.routes[0].coords, 18);
       const wx = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${pts.map((x) => x.lat.toFixed(4)).join(',')}&longitude=${pts.map((x) => x.lon.toFixed(4)).join(',')}&hourly=temperature_2m,snowfall,precipitation,weather_code&temperature_unit=fahrenheit&precipitation_unit=inch&timeformat=unixtime&forecast_days=5`).catch(() => null);

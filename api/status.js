@@ -88,6 +88,27 @@ export default async function handler(req, res) {
   const id = String(req.query.id || '').replace(/[^a-z0-9-]/gi, '');
   const feed = FEEDS[id];
   if (!feed) { res.setHeader('Cache-Control', 's-maxage=86400'); return res.status(200).json({ found: false }); }
+  if (req.query.fields) { // temporary: which wait-time fields does this feed publish?
+    const out = [];
+    try {
+      let arr = [];
+      if (feed.type === 'mtnpowder') arr = JSON.parse(await get(`https://mtnpowder.com/feed/${feed.id}/lifts`, 'application/json'));
+      else {
+        const html = await get(feed.url, 'text/html');
+        const k = html.indexOf('TerrainStatusFeed = {'), st = html.lastIndexOf('<script', k), en = html.indexOf('</script>', k);
+        const ctx = { FR: {} }; vm.runInNewContext(html.slice(html.indexOf('>', st) + 1, en), ctx, { timeout: 200 });
+        const f = ctx.FR.TerrainStatusFeed || {};
+        arr = [...(f.Lifts || []), ...(f.GroomingAreas || []).flatMap((g) => g.Lifts || [])];
+      }
+      const keys = [...new Set(arr.flatMap((l) => Object.keys(l)))];
+      out.push(`lifts ${arr.length}`, `fields: ${keys.join(', ')}`);
+      const wk = keys.filter((k) => /wait|line|queue|time/i.test(k));
+      out.push(`wait-like fields: ${wk.join(', ') || 'none'}`);
+      for (const l of arr.slice(0, 40)) { const v = wk.map((k) => `${k}=${JSON.stringify(l[k])}`).join(' '); if (v) out.push(`${l.Name}: ${v}`); }
+    } catch (e) { out.push(String(e)); }
+    res.setHeader('Content-Type', 'text/plain');
+    return res.status(200).send(out.join('\n'));
+  }
   try {
     let lifts;
     if (feed.type === 'mtnpowder') lifts = fromMtnpowder(JSON.parse(await get(`https://mtnpowder.com/feed/${feed.id}/lifts`, 'application/json')));

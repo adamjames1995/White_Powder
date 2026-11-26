@@ -22,7 +22,8 @@ async function windy(lat, lon, km, key) {
     id: `w${c.webcamId}`, title: c.title, src: 'Windy',
     image: c.images?.current?.preview || c.images?.daylight?.preview,
     link: c.urls?.detail || `https://www.windy.com/webcams/${c.webcamId}`,
-    embed: (typeof c.player?.live === 'string' && c.player.live) || (typeof c.player?.day === 'string' && c.player.day) || c.player?.live?.embed || c.player?.day?.embed || null,
+    // Timelapse player (v3 returns strings or {available, embed}); fall back to Windy's public player URL so every cam plays in-app.
+    embed: (typeof c.player?.live === 'string' && c.player.live) || (c.player?.live?.available && c.player.live.embed) || (typeof c.player?.day === 'string' && c.player.day) || c.player?.day?.embed || `https://webcams.windy.com/webcams/public/embed/player/${c.webcamId}/day`,
     live: !!(c.player?.live && (typeof c.player.live === 'string' || c.player.live.available)),
     km: c.location ? dist([lat, lon], [c.location.latitude, c.location.longitude]) / 1000 : null,
   })).filter((c) => c.image);

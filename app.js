@@ -936,7 +936,7 @@ function loadObs(r) {
 }
 
 const CAM_AUTO_KEY = 'wp:cam-autoplay:v1';
-const camAutoplay = () => localStorage.getItem(CAM_AUTO_KEY) === '1';
+const camAutoplay = () => localStorage.getItem(CAM_AUTO_KEY) !== '0'; // on by default
 
 async function loadCams(r) {
   const el = () => document.getElementById('cams');
@@ -957,15 +957,30 @@ async function loadCams(r) {
       <span>${esc(c.name)}</span>
     </button>`;
   const official = `<a class="cam official" href="${esc(camsLink(r))}" target="_blank" rel="noopener"><div class="ph">📷</div><span>${r.camsUrl ? `All ${esc(r.name)} cams` : `Search ${esc(r.name)} webcams`} ↗</span></a>`;
-  const first = all.findIndex((c) => c.embed);
+  let first = all.findIndex((c) => c.embed);
+  if (first < 0) first = all.findIndex((c) => c.preview);
   const auto = camAutoplay() && first >= 0;
+  const snap = (u) => `${u}${u.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  const feature = (c) => (c.embed
+    ? `<iframe id="cam-live" src="${esc(c.embed)}" title="${esc(c.name)} webcam" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`
+    : `<img id="cam-live" class="cam-snap" data-src="${esc(c.preview)}" src="${esc(snap(c.preview))}" alt="${esc(c.name)}"/>`);
   el().innerHTML = `
-    ${auto ? `<div class="cam-feature"><div class="cam-frame"><iframe id="cam-live" src="${esc(all[first].embed)}" title="${esc(all[first].name)} webcam" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe></div><div class="small muted cam-cap" id="cam-cap">${esc(all[first].name)} · auto-play is on (Alerts &amp; settings)</div></div>` : ''}
+    ${auto ? `<div class="cam-feature"><div class="cam-frame" id="cam-frame">${feature(all[first])}</div><div class="small muted cam-cap" id="cam-cap">${esc(all[first].name)}</div></div>` : ''}
     <div class="camrow-in">${all.map(tile).join('')}${official}</div>
     ${!all.length ? '<p class="small muted">No cams found for this mountain yet — try the link above.</p>' : ''}
     ${cams.list.length ? `<p class="small muted" style="margin:6px 0 0">Nearby cams via ${[...new Set(cams.list.map((c) => c.src || 'Windy'))].map((x) => (x === 'Windy' ? '<a href="https://www.windy.com/webcams" target="_blank" rel="noopener">windy.com</a>' : x)).join(', ')}</p>` : ''}`;
+  clearInterval(loadCams.tick);
+  loadCams.tick = setInterval(() => {
+    const im = document.querySelector('img.cam-snap');
+    if (!im || location.hash !== `#/resort/${r.id}`) { if (!document.getElementById('cams')) clearInterval(loadCams.tick); return; }
+    const n = new Image(); n.onload = () => { im.src = n.src; }; n.src = snap(im.dataset.src);
+  }, 30000);
   el().querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', () => {
     const c = all[Number(b.dataset.i)];
+    if (!c.embed && c.preview && document.getElementById('cam-frame')) {
+      document.getElementById('cam-frame').innerHTML = feature(c); document.getElementById('cam-cap').textContent = c.name;
+      document.getElementById('cam-frame').scrollIntoView({ block: 'center', behavior: 'smooth' }); return;
+    }
     if (!c.embed && c.preview) { // snapshot cams (highway / Windy without a player): enlarge in the app
       const m = modal(`<div class="cam-h"><b>${esc(c.name)}</b><button class="circ sm" id="sc-x" aria-label="Close">✕</button></div>
         <img class="ft-cam-big" src="${esc(c.preview)}${c.preview.includes('?') ? '&' : '?'}t=${Date.now()}" alt=""/>
@@ -974,8 +989,8 @@ async function loadCams(r) {
       return;
     }
     if (!c.embed) { window.open(c.link, '_blank', 'noopener'); return; }
-    const live = document.getElementById('cam-live');
-    if (live) { live.src = c.embed; document.getElementById('cam-cap').textContent = c.name; live.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    const frame = document.getElementById('cam-frame');
+    if (frame) { frame.innerHTML = feature(c); document.getElementById('cam-cap').textContent = c.name; frame.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
     else openCam(c.name, c.embed, r);
   }));
 }
@@ -2727,7 +2742,7 @@ async function renderSettings() {
     </section>
     <section class="section stack">
       <h3>Webcams</h3>
-      <label class="opt"><input type="checkbox" id="cam-auto" ${camAutoplay() ? 'checked' : ''}/> Auto-play the first cam when I open a mountain</label>
+      <label class="opt"><input type="checkbox" id="cam-auto" ${camAutoplay() ? 'checked' : ''}/> Auto-play the first cam when I open a mountain (on by default)</label>
       <p class="small muted">Off by default: live video uses more data and can slow things down. When off, tap any cam preview to play it.</p>
     </section>
     <section class="section stack" id="push-box">

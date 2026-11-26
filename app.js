@@ -1,7 +1,7 @@
 import { loadSkiArea, dist } from '/lib/skiarea.js';
 import { DayTracker } from '/lib/track.js';
 import { plan, feedFor, LEVELS as AI_LEVELS, SNOW } from '/lib/plan.js';
-import { VEHICLE_DEFAULT, chainLevel, chainAdvice, passAdvice, pickLeave, powderPick, packList, sampleRoute, googleMapsUrl, appleMapsUrl, fmtDur } from '/lib/drive.js';
+import { GOALS, VEHICLE_DEFAULT, chainLevel, chainAdvice, passAdvice, pickLeave, powderPick, packList, sampleRoute, googleMapsUrl, appleMapsUrl, fmtDur } from '/lib/drive.js';
 import { CATALOG, logoUrl, openingFor, passOf, PASSES, slug, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS, midFt } from '/lib/snow.js';
 import { fetchDetail, compass } from '/lib/detail.js';
@@ -2209,7 +2209,7 @@ function renderSquad() {
 const VEH_KEY = 'wp:vehicle:v1', FT_KEY = 'wp:ft:v1';
 const getVehicle = () => { try { const v = JSON.parse(localStorage.getItem(VEH_KEY) || 'null'); return v ? { ...VEHICLE_DEFAULT, ...v } : null; } catch { return null; } };
 const setVehicle = (v) => { try { localStorage.setItem(VEH_KEY, JSON.stringify(v)); } catch {} };
-const ftPrefs = () => { try { return { dest: '', day: 0, chair: '', ...JSON.parse(localStorage.getItem(FT_KEY) || '{}') }; } catch { return { dest: '', day: 0, chair: '' }; } };
+const ftPrefs = () => { try { return { dest: '', day: 0, chair: '', goal: 'chair', route: 0, ...JSON.parse(localStorage.getItem(FT_KEY) || '{}') }; } catch { return { dest: '', day: 0, chair: '' }; } };
 const setFt = (p) => { try { localStorage.setItem(FT_KEY, JSON.stringify({ ...ftPrefs(), ...p })); } catch {} };
 const FIRST_CHAIR = { whistler: '08:30' };
 const ftCache = new Map();
@@ -2291,7 +2291,7 @@ async function planDrive(dest, dayOffset, chair) {
       const base = await getJSON(`/api/firsttracks?flat=${from[0]}&flon=${from[1]}&tlat=${to[0]}&tlon=${to[1]}`);
       const chairMs = dayStart + hh * 3600e3 + mm * 60e3;
       const departs = [];
-      if (base.traffic) for (let k = 0; k < 7; k++) { const t = chairMs - 30 * 60e3 - base.routes[0].min * 60e3 - (90 - k * 30) * 60e3; if (t > Date.now()) { const dt = new Date(Math.round(t / 900e3) * 900e3); departs.push(new Date(dt.getTime() - dt.getTimezoneOffset() * 60e3).toISOString().slice(0, 19)); } } // local wall-clock time (TomTom reads it as the origin's time zone)
+      if (base.traffic) for (let k = 0; k < 10; k++) { const t = chairMs - 30 * 60e3 - base.routes[0].min * 60e3 - (240 - k * 30) * 60e3; if (t > Date.now()) { const dt = new Date(Math.round(t / 900e3) * 900e3); departs.push(new Date(dt.getTime() - dt.getTimezoneOffset() * 60e3).toISOString().slice(0, 19)); } } // local wall-clock time (TomTom reads it as the origin's time zone)
       const times = departs.length ? (await getJSON(`/api/firsttracks?flat=${from[0]}&flon=${from[1]}&tlat=${to[0]}&tlon=${to[1]}&departs=${departs.join(',')}`).catch(() => ({ times: [] }))).times : [];
       const pts = sampleRoute(base.routes[0].coords, 18);
       const wx = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${pts.map((x) => x.lat.toFixed(4)).join(',')}&longitude=${pts.map((x) => x.lon.toFixed(4)).join(',')}&hourly=temperature_2m,snowfall,precipitation,weather_code&temperature_unit=fahrenheit&precipitation_unit=inch&timeformat=unixtime&forecast_days=5`).catch(() => null);
@@ -2317,9 +2317,13 @@ async function planDrive(dest, dayOffset, chair) {
   const live = dayOffset === 0 || (dayStart - Date.now() < 18 * 3600e3);
   const chains = base.chains.map((c) => ({ ...c, level: chainLevel(c.status, c.text) }));
   const chainMax = live ? Math.max(0, ...chains.map((c) => c.level)) : 0;
-  const plan = pickLeave({ dayStart, firstChair: chair, baseMin: route.min, times, samples, chainLevelMax: chainMax, now: Date.now() });
   const resortSample = samples.find((s) => s.frac === 1);
   const pow = powderPick(resortSample?.hourly, samples.filter((s) => s.frac < 1), 4);
+  const powderDay = (pow.days.find((x) => x.day === dayStart)?.overnight || 0) >= 6;
+  const goal = GOALS[ftPrefs().goal] ? ftPrefs().goal : 'chair';
+  const plans = Object.fromEntries(Object.keys(GOALS).map((g) => [g, pickLeave({ goal: g, dayStart, firstChair: chair, baseMin: route.min, times, samples, chainLevelMax: chainMax, now: Date.now(), powderDay })]));
+  const plan = plans[goal];
+  const ri = Math.min(Number(ftPrefs().route) || 0, base.routes.length - 1);
   const inDay = (s) => s.hourly.t.map((t, i) => [t, i]).filter(([t]) => t >= plan.leave && t <= plan.arrive);
   const snowOnRoad = Math.max(0, ...samples.map((s) => inDay(s).reduce((a, [, i]) => a + (s.hourly.snow[i] || 0), 0)));
   const minTemp = Math.min(60, ...samples.flatMap((s) => inDay(s).map(([, i]) => s.hourly.temp[i])).filter(Number.isFinite));
@@ -2329,7 +2333,7 @@ async function planDrive(dest, dayOffset, chair) {
   const passes = base.passes || [];
   const closures = (base.closures || []).filter((c) => c.full);
   const alerts = (base.alerts || []).filter((a) => a.closed || /CLOSURE|INCIDENT|MAJOR|closed/i.test(`${a.kind} ${a.text}`)).slice(0, 8);
-  const gUrl = googleMapsUrl(from, dest.name, null, route.coords), aUrl = appleMapsUrl(from, dest.name, null);
+  const aUrl = appleMapsUrl(from, dest.name, null);
   const fmtT = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const highest = [...samples].sort((a, b) => b.elevFt - a.elevFt).slice(0, 3);
   const wxRows = [...new Set([...highest, samples[samples.length - 1]])].sort((a, b) => a.frac - b.frac).map((s) => {
@@ -2341,9 +2345,11 @@ async function planDrive(dest, dayOffset, chair) {
   }).join('');
   body().innerHTML = `
     <section class="card pad ft-verdict">
-      <div class="ft-leave-k">${plan.late ? 'Leave now' : 'Leave by'}</div>
+      <div class="seg-ctl ai-seg ft-goals" id="ft-goal">${Object.entries(GOALS).map(([k, g]) => `<button data-g="${k}" class="${k === goal ? 'on' : ''}">${g.short}</button>`).join('')}</div>
+      <div class="ft-leave-k">${plan.late ? 'Leave now' : `Leave by · ${GOALS[goal].label}`}</div>
       <div class="ft-leave">${plan.late ? fmtT(Date.now()) : fmtT(plan.leave)}</div>
       <ul class="ft-reasons">${plan.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+      <div class="ft-allgoals">${Object.entries(GOALS).map(([k, g]) => `<button data-g="${k}" class="${k === goal ? 'on' : ''}"><span>${g.short}</span><b>${plans[k].late ? 'Now' : fmtT(plans[k].leave)}</b></button>`).join('')}</div>
       ${!base.traffic ? '<p class="small muted">Traffic isn\'t included yet (needs the free TomTom key).</p>' : ''}
       ${pow.best ? `<div class="ft-pow">❄️ Powder pick: <b>${pow.best.day === dayStart ? 'this day' : new Date(pow.best.day).toLocaleDateString('en-US', { weekday: 'long' })}</b> — ${pow.best.overnight.toFixed(0)}" overnight at ${esc(dest.name)}${pow.best.road >= 1 ? `, ${pow.best.road.toFixed(0)}" on the road that morning` : ', roads mostly clear'}.</div>` : ''}
     </section>
@@ -2363,12 +2369,23 @@ async function planDrive(dest, dayOffset, chair) {
     <section class="card pad"><h3 style="margin:0 0 6px">Weather on the drive</h3>${wxRows || '<p class="small muted">Weather unavailable.</p>'}</section>
     <section class="card pad"><h3 style="margin:0 0 6px">Pack for this trip</h3>
       ${pack.map((it) => `<label class="opt ft-pack ${it.must ? 'must' : ''}"><input type="checkbox"/> ${esc(it.t)}</label>`).join('')}</section>
-    <section class="card pad"><h3 style="margin:0 0 6px">Route</h3>
-      ${base.routes.map((r, k) => `<div class="ft-route ${k ? '' : 'best'}"><b>${k ? `Option ${k + 1}` : 'Best route'}</b> · ${fmtDur(r.min)} · ${Math.round(r.km * 0.621)} mi${r.delayMin >= 3 ? ` · <span class="err">+${Math.round(r.delayMin)} min traffic now</span>` : ''}</div>`).join('')}
-      <div class="ft-maps"><a class="btn primary" href="${esc(gUrl)}" target="_blank" rel="noopener">Open in Google Maps</a><a class="btn" href="${esc(aUrl)}" target="_blank" rel="noopener">Apple Maps</a></div>
-      <p class="small muted">Google follows this exact route. Apple Maps picks its own route to ${esc(dest.name)}.</p></section>
+    <section class="card pad"><h3 style="margin:0 0 6px">Routes</h3>
+      <div class="ft-map" id="ft-map"></div>
+      ${base.routes.map((r, k) => `<div class="ft-route ${k === ri ? 'sel' : ''}" data-r="${k}">
+        <div class="ft-route-h"><span class="ft-swatch" style="background:${ROUTE_COL[k]}"></span><b>${k ? `Option ${k + 1}` : 'Fastest'}</b> · ${fmtDur(r.min)} · ${Math.round(r.km * 0.621)} mi${r.delayMin >= 3 ? ` · <span class="err">+${Math.round(r.delayMin)} min traffic now</span>` : ''}${routeVia(r, base.routes) ? `<div class="small muted">via ${esc(routeVia(r, base.routes))}</div>` : ''}</div>
+        <div class="ft-maps"><a class="btn sm primary" href="${esc(googleMapsUrl(from, dest.name, null, r.coords))}" target="_blank" rel="noopener">Google Maps</a><a class="btn sm" href="${esc(aUrl)}" target="_blank" rel="noopener">Apple Maps</a></div>
+      </div>`).join('')}
+      <p class="small muted">Google Maps follows each route exactly. Apple Maps links can only take a start and destination, so Apple picks its own route.</p></section>
     ${base.cams.length ? `<section class="section"><h3>Cams along the way</h3><div class="ft-cams">${base.cams.map((c, i) => `<button class="ft-cam" data-cam="${i}"><img src="${esc(c.img)}" alt="" loading="lazy" onerror="this.closest('.ft-cam').remove()"/><span>${esc(titleCase(c.name || ''))}</span></button>`).join('')}</div></section>` : ''}
     <p class="small muted ft-src">Road data: ${[chains.length && 'Caltrans', passes.length && 'WSDOT', bc && 'DriveBC'].filter(Boolean).join(', ') || '—'} · Weather: Open-Meteo · ${base.traffic ? 'Traffic: TomTom' : 'Routing: OSRM'} · as of ${fmtT(Date.parse(base.fetchedAt))}</p>`;
+  body().querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => { setFt({ goal: b.dataset.g }); planDrive(dest, dayOffset, chair); }));
+  body().querySelectorAll('.ft-route').forEach((el) => el.addEventListener('click', (e) => {
+    if (e.target.closest('a')) return;
+    setFt({ route: Number(el.dataset.r) });
+    body().querySelectorAll('.ft-route').forEach((x) => x.classList.toggle('sel', x === el));
+    drawRouteMap(base.routes, Number(el.dataset.r), from, to);
+  }));
+  drawRouteMap(base.routes, ri, from, to);
   body().querySelectorAll('[data-cam]').forEach((b) => b.addEventListener('click', () => {
     const c = base.cams[Number(b.dataset.cam)];
     const m = modal(`<div class="cam-h"><b>${esc(titleCase(c.name || 'Highway cam'))}</b><button class="circ sm" id="fc-x" aria-label="Close">✕</button></div>
@@ -2377,6 +2394,56 @@ async function planDrive(dest, dayOffset, chair) {
     m.querySelector('#fc-x').onclick = () => m.remove();
     m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
   }));
+}
+const ROUTE_COL = ['#2563eb', '#8b5cf6', '#0d9488'];
+// Highways a route uses that the fastest route doesn't ("via US-50").
+function routeVia(r, all) {
+  const roads = r.roads || [];
+  if (r === all[0]) return roads.slice(0, 3).join(' → ');
+  const diff = roads.filter((x) => !(all[0].roads || []).includes(x));
+  return (diff.length ? diff : roads).slice(0, 3).join(' → ');
+}
+let ftMap = null;
+async function drawRouteMap(routes, sel, from, to) {
+  const el = document.getElementById('ft-map'); if (!el) return;
+  try { await loadMapLibre(); } catch { el.innerHTML = '<p class="pad small muted">Map unavailable.</p>'; return; }
+  if (!document.body.contains(el)) return;
+  const feats = routes.map((r, k) => lineF(r.coords, { k, sel: k === sel }));
+  const draw = () => {
+    ftMap.getSource('routes').setData(fc(feats));
+    const all = routes[sel].coords.map(([la, lo]) => [lo, la]);
+    ftMap.fitBounds(all.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(all[0], all[0])), { padding: 28, duration: 600 });
+  };
+  if (ftMap && ftMap.getContainer() === el && ftMap.getSource('routes')) return draw();
+  try { ftMap?.remove(); } catch {}
+  try {
+    ftMap = new maplibregl.Map({ container: el, style: roadStyle(), center: [to[1], to[0]], zoom: 7, attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false });
+  } catch { el.innerHTML = '<p class="pad small muted">Map needs WebGL.</p>'; return; }
+  ftMap.once('style.load', () => {
+    ftMap.addSource('routes', { type: 'geojson', data: fc([]) });
+    ftMap.addLayer({ id: 'r-alt', type: 'line', source: 'routes', filter: ['!', ['get', 'sel']], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['match', ['get', 'k'], 1, ROUTE_COL[1], 2, ROUTE_COL[2], ROUTE_COL[0]], 'line-width': 4, 'line-opacity': 0.55 } });
+    ftMap.addLayer({ id: 'r-casing', type: 'line', source: 'routes', filter: ['get', 'sel'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 9 } });
+    ftMap.addLayer({ id: 'r-sel', type: 'line', source: 'routes', filter: ['get', 'sel'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['match', ['get', 'k'], 1, ROUTE_COL[1], 2, ROUTE_COL[2], ROUTE_COL[0]], 'line-width': 6 } });
+    const pin = (ll, cls) => { const d = document.createElement('div'); d.className = cls; return new maplibregl.Marker({ element: d }).setLngLat([ll[1], ll[0]]).addTo(ftMap); };
+    pin(from, 'ft-pin from'); pin(to, 'ft-pin to');
+    draw();
+  });
+}
+function roadStyle() {
+  return {
+    version: 8, glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+    sources: { omt: { type: 'vector', url: 'https://tiles.openfreemap.org/planet' }, shade: DEM },
+    layers: [
+      { id: 'bg', type: 'background', paint: { 'background-color': '#eef0ec' } },
+      { id: 'shade', type: 'hillshade', source: 'shade', paint: { 'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#7d8a99', 'hillshade-highlight-color': '#ffffff' } },
+      { id: 'forest', type: 'fill', source: 'omt', 'source-layer': 'landcover', filter: ['==', ['get', 'class'], 'wood'], paint: { 'fill-color': '#cfe3c8', 'fill-opacity': 0.7 } },
+      { id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water', paint: { 'fill-color': '#a9cdeb' } },
+      { id: 'minor', type: 'line', source: 'omt', 'source-layer': 'transportation', minzoom: 9, filter: ['in', ['get', 'class'], ['literal', ['secondary', 'tertiary']]], paint: { 'line-color': '#ffffff', 'line-width': 1.2 } },
+      { id: 'major', type: 'line', source: 'omt', 'source-layer': 'transportation', filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary']]], paint: { 'line-color': '#f3c77a', 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.8, 10, 2.5] } },
+      { id: 'places', type: 'symbol', source: 'omt', 'source-layer': 'place', filter: ['in', ['get', 'class'], ['literal', ['city', 'town']]], layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': 11 }, paint: { 'text-color': '#3f4650', 'text-halo-color': '#ffffff', 'text-halo-width': 1.4 } },
+      { id: 'shields', type: 'symbol', source: 'omt', 'source-layer': 'transportation_name', minzoom: 6, filter: ['has', 'ref'], layout: { 'symbol-placement': 'line', 'text-field': ['get', 'ref'], 'text-font': ['Noto Sans Bold'], 'text-size': 10, 'symbol-spacing': 300 }, paint: { 'text-color': '#7a4b00', 'text-halo-color': '#fff7e6', 'text-halo-width': 2 } },
+    ],
+  };
 }
 const wmoIcon = (c) => (c >= 95 ? '⛈️' : c >= 85 || (c >= 71 && c <= 77) ? '🌨️' : c >= 61 || (c >= 51 && c <= 57) || (c >= 80 && c <= 82) ? '🌧️' : c >= 45 && c <= 48 ? '🌫️' : c >= 2 ? '☁️' : '☀️');
 const titleCase = (s) => String(s).toLowerCase().replace(/(^|[\s(/-])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(Sr|Us|I|Ca|Hwy|Mp)\b/g, (x) => x.toUpperCase());

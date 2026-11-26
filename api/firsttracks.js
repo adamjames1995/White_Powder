@@ -17,7 +17,7 @@ const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null 
 // ---------- routing ----------
 async function tomtomRoutes(from, to, departAt, key) {
   const loc = `${from[0]},${from[1]}:${to[0]},${to[1]}`;
-  const q = new URLSearchParams({ key, traffic: 'true', maxAlternatives: '2', computeTravelTimeFor: 'all', routeType: 'fastest', travelMode: 'car' });
+  const q = new URLSearchParams({ key, traffic: 'true', maxAlternatives: '2', computeTravelTimeFor: 'all', routeType: 'fastest', travelMode: 'car', instructionsType: 'text' });
   if (departAt) q.set('departAt', departAt);
   const j = await get(`https://api.tomtom.com/routing/1/calculateRoute/${loc}/json?${q}`, 12000);
   return (j.routes || []).map((r) => ({
@@ -26,11 +26,13 @@ async function tomtomRoutes(from, to, departAt, key) {
     typicalMin: r.summary.historicTrafficTravelTimeInSeconds != null ? r.summary.historicTrafficTravelTimeInSeconds / 60 : null,
     depart: r.summary.departureTime, arrive: r.summary.arrivalTime,
     coords: r.legs.flatMap((l) => l.points.map((p) => [p.latitude, p.longitude])), traffic: true,
+    roads: highways((r.guidance?.instructions || []).flatMap((i) => i.roadNumbers || [])),
   }));
 }
 async function osrmRoutes(from, to) {
-  const j = await get(`https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson&alternatives=2`, 12000);
-  return (j.routes || []).map((r) => ({ km: r.distance / 1000, min: r.duration / 60, delayMin: 0, noTrafficMin: r.duration / 60, typicalMin: null, coords: r.geometry.coordinates.map(([lo, la]) => [la, lo]), traffic: false }));
+  const j = await get(`https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson&alternatives=2&steps=true`, 12000);
+  return (j.routes || []).map((r) => ({ km: r.distance / 1000, min: r.duration / 60, delayMin: 0, noTrafficMin: r.duration / 60, typicalMin: null, coords: r.geometry.coordinates.map(([lo, la]) => [la, lo]), traffic: false,
+    roads: highways((r.legs || []).flatMap((l) => (l.steps || []).flatMap((st) => String(st.ref || '').split(';')))) }));
 }
 // Travel time for several departure times (traffic forecast), best route only.
 async function tomtomTimes(from, to, departs, key) {
@@ -45,6 +47,16 @@ async function tomtomTimes(from, to, departs, key) {
     } catch {}
   }));
   return out.sort((a, b) => a.depart.localeCompare(b.depart));
+}
+
+/** Ordered, de-duplicated highway numbers (I-80, US 50, CA 88 …). */
+function highways(list) {
+  const out = [];
+  for (const raw of list) {
+    const x = String(raw || '').trim().replace(/^(SR|CA|WA)[ -]?/i, 'Hwy ').replace(/^US[ -]?/i, 'US-').replace(/^I[ -]?/i, 'I-');
+    if (x && /\d/.test(x) && !out.includes(x)) out.push(x);
+  }
+  return out.slice(0, 8);
 }
 
 // ---------- geometry helpers ----------

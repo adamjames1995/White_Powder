@@ -841,3 +841,19 @@ html[data-theme="light"] .tabbar a.on { color: #111; background: rgba(255,255,25
 .ai-title.brand-title { font-size: 24px; }
 .tabbar a { font-family: 'WP Brand', -apple-system, sans-serif; font-style: italic; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; font-size: 11px; padding: 11px 0; }
 .tabbar a span, .tabbar .ai-live { display: none; }
+
+.ft-goals { margin-bottom: 10px; }
+.ft-goals button { font-size: 13px; }
+.ft-allgoals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; }
+.ft-allgoals button { border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); border-radius: 10px; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.ft-allgoals button span { font-size: 11px; color: var(--text-muted); }
+.ft-allgoals button b { font-size: 14px; }
+.ft-allgoals button.on { border-color: var(--accent); background: rgba(57,135,229,.16); }
+.ft-map { height: 260px; border-radius: 12px; overflow: hidden; margin-bottom: 8px; background: #eef0ec; }
+.ft-route { padding: 10px; border: 1px solid var(--border); border-radius: 12px; margin: 8px 0; cursor: pointer; }
+.ft-route.sel { border-color: var(--accent); background: rgba(57,135,229,.08); }
+.ft-route .ft-maps { margin: 8px 0 0; }
+.ft-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+.ft-pin { width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+.ft-pin.from { background: #111; } .ft-pin.to { background: #dc2626; }
+.btn.sm { padding: 7px 10px; font-size: 13px; }

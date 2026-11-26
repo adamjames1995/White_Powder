@@ -453,11 +453,11 @@ function renderHome() {
         <div class="rc-head">
           ${badge(r, 'sm')}
           <div class="rc-title">
-            <h2>${esc(r.name)}${passChip(r)}${wx ? ` <span class="snow-now ${wx.kind}">${wx.label}</span>` : ''}${pd ? ` <span class="pow" title="Powder alert">❄ ${inch(pd.snow)} ${dow(pd.date)}</span>` : ''}</h2>
-            <div class="sub">${driveChip(r) || `${LEVELS[getLevel()]} ${levelFt(r).toLocaleString()} ft · `}${esc(r.state || r.country || '')}<span class="depth" id="depth-${r.id}">${depthChip(r)}</span></div>
+            <h2><span class="rc-name">${esc(r.name)}</span>${passChip(r)}</h2>
+            <div class="sub">${driveChip(r) || `<span title="${LEVELS[getLevel()]} elevation">${levelFt(r).toLocaleString()}′</span> · `}<span title="${esc(r.state || r.country || '')}">${esc(placeAbbr(r))}</span><span class="depth" id="depth-${r.id}">${depthChip(r)}</span>${wx ? ` · <span class="wxmini ${wx.kind}" title="${esc(wx.label)} now">${WX_ICON[wx.kind]} ${WX_SHORT[wx.kind]}</span>` : ''}</div>
             <div class="mstatus" id="status-${r.id}">${statusLine(r)}</div>
           </div>
-          ${star}
+          <div class="rc-side">${star}${pd ? `<span class="powmini" title="Powder alert: ${inch(pd.snow)} ${dow(pd.date)}">❄${inch(pd.snow)}<b>${dow(pd.date)}</b></span>` : ''}</div>
         </div>
         <div class="scroller compact" data-strip="${r.id}"></div>
       </a></div>`;
@@ -658,6 +658,13 @@ async function loadModelDepth(r) {
   } catch { modelDepth.set(r.id, null); }
 }
 
+const WX_ICON = { light: '🌨️', mod: '🌨️', heavy: '🌨️', blizzard: '🌬️', mix: '🌧️' };
+const WX_SHORT = { light: 'Light', mod: 'Snow', heavy: 'Heavy', blizzard: 'Blizzard', mix: 'Mix' };
+const ABBR = { Alabama: 'AL', Alaska: 'AK', Arizona: 'AZ', Arkansas: 'AR', California: 'CA', Colorado: 'CO', Connecticut: 'CT', Delaware: 'DE', Florida: 'FL', Georgia: 'GA', Hawaii: 'HI', Idaho: 'ID', Illinois: 'IL', Indiana: 'IN', Iowa: 'IA', Kansas: 'KS', Kentucky: 'KY', Louisiana: 'LA', Maine: 'ME', Maryland: 'MD', Massachusetts: 'MA', Michigan: 'MI', Minnesota: 'MN', Mississippi: 'MS', Missouri: 'MO', Montana: 'MT', Nebraska: 'NE', Nevada: 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ', 'New Mexico': 'NM', 'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND', Ohio: 'OH', Oklahoma: 'OK', Oregon: 'OR', Pennsylvania: 'PA', 'Rhode Island': 'RI', 'South Carolina': 'SC', 'South Dakota': 'SD', Tennessee: 'TN', Texas: 'TX', Utah: 'UT', Vermont: 'VT', Virginia: 'VA', Washington: 'WA', 'West Virginia': 'WV', Wisconsin: 'WI', Wyoming: 'WY',
+  Alberta: 'AB', 'British Columbia': 'BC', Manitoba: 'MB', 'New Brunswick': 'NB', 'Newfoundland and Labrador': 'NL', 'Nova Scotia': 'NS', Ontario: 'ON', Quebec: 'QC', Québec: 'QC', Saskatchewan: 'SK', Yukon: 'YT',
+  Switzerland: 'CH', France: 'FR', Austria: 'AT', Italy: 'IT', Japan: 'JP', Chile: 'CL', Argentina: 'AR', Australia: 'AU', 'New Zealand': 'NZ', Germany: 'DE', Andorra: 'AD', Spain: 'ES', Norway: 'NO', Sweden: 'SE', Canada: 'CA', USA: 'US', 'United States': 'US' };
+const placeAbbr = (r) => { const p = r.state || r.country || ''; return ABBR[p] || (p.length > 12 ? p.split(/[\s,]+/)[0] : p); };
+
 function depthChip(r) {
   const o = snotelCache.get(r.id);
   if (hasStationDepth(r)) {
@@ -665,7 +672,7 @@ function depthChip(r) {
   }
   if (modelDepth.has(r.id)) {
     const v = modelDepth.get(r.id);
-    return v == null ? '' : ` · <span title="Forecast-model estimate at base elevation">Base <b>~${v}"</b> est.</span>`;
+    return v == null ? '' : ` · <span title="Forecast-model estimate at base elevation">Base <b>~${v}"</b></span>`;
   }
   return '';
 }

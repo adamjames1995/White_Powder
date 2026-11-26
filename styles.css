@@ -872,3 +872,19 @@ body:not(.detail) { padding-top: var(--tb-h, 0px); }
 .sp-gps { width: 100%; margin-bottom: 6px; }
 .sp-res { max-height: 45vh; overflow: auto; }
 .sp-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--border); color: var(--text-primary); padding: 10px 2px; }
+
+/* compact card header: name + pass on line 1, short facts on line 2, weather/powder badges under the star */
+.rc-title h2 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rc-title h2 .rc-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-title h2 .passchip { flex: none; margin-left: 0; }
+.rc-side { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 44px; }
+.wxmini, .powmini { display: flex; flex-direction: column; align-items: center; line-height: 1.05; font-size: 15px; }
+.wxmini b, .powmini b { font-size: 10px; font-weight: 700; color: var(--text-secondary); letter-spacing: .02em; }
+.wxmini.heavy b, .wxmini.blizzard b { color: #9ec5ff; }
+.powmini { font-size: 12px; font-weight: 700; color: var(--accent); }
+
+.rc-title .sub .wxmini { display: inline; font-size: inherit; font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+.rc-title .sub .wxmini.heavy, .rc-title .sub .wxmini.blizzard { color: #9ec5ff; }
+html[data-theme="light"] .rc-title .sub .wxmini.heavy, html[data-theme="light"] .rc-title .sub .wxmini.blizzard { color: #1d4f91; }
+.powmini { font-size: 13px; }
+.powmini b { font-size: 10px; }

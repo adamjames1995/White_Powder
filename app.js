@@ -1,4 +1,4 @@
-import { loadSkiArea } from '/lib/skiarea.js';
+import { loadSkiArea, dist } from '/lib/skiarea.js';
 import { DayTracker } from '/lib/track.js';
 import { plan, feedFor, LEVELS as AI_LEVELS, SNOW } from '/lib/plan.js';
 import { CATALOG, logoUrl, openingFor, passOf, PASSES, slug, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
@@ -1886,9 +1886,13 @@ function renderAIDay(day) {
     }
     localStorage.removeItem(AI_DAY_KEY); stopTracking(); renderAI();
   });
-  document.getElementById('ai-recenter').addEventListener('click', () => { const f = AI.lastFix; if (f && AI.map) AI.map.setView([f.lat, f.lon], 16); });
+  document.getElementById('ai-recenter').addEventListener('click', () => {
+    const f = AI.lastFix; if (!AI.map) return;
+    const up = upBearing(AI.area); AI.facing = aiFacing();
+    AI.map.easeTo({ center: f ? [f.lon, f.lat] : AI.map.getCenter(), zoom: f ? 15.2 : AI.map.getZoom(), pitch: 58, bearing: AI.facing === 'up' ? up : (up + 180) % 360, duration: 900 });
+  });
   // Tracking keeps running while you look at forecasts; coming back just redraws.
-  if (AI.watch != null && AI.dayId === day.id) { AI.map = null; drawAIMap(day); aiUpdate(true); return; }
+  if (AI.watch != null && AI.dayId === day.id) { try { AI.map?.remove(); } catch {} AI.map = null; drawAIMap(day); aiUpdate(true); return; }
   startTracking(day);
   AI.dayId = day.id;
 }
@@ -1938,7 +1942,7 @@ function stopTracking(keepDay) {
   AI.wake = null;
   if (AI.onVis) document.removeEventListener('visibilitychange', AI.onVis);
   if (!keepDay && AI.tracker) saveAIDay();
-  AI.map?.remove?.(); AI.map = null; AI.layers = null; AI.dayId = null;
+  try { AI.map?.remove?.(); } catch {} AI.map = null; AI.layers = null; AI.dayId = null;
 }
 function saveAIDay() {
   const d = aiDay(); if (!d || !AI.tracker) return;
@@ -1951,35 +1955,117 @@ function aiToast(t) {
   b.textContent = t; b.hidden = false; clearTimeout(aiToast.t); aiToast.t = setTimeout(() => { b.hidden = true; }, 6000);
 }
 
+// ---------- 3D ski map (MapLibre): snow-white terrain, forests, hill shading, runs + lifts draped on the slopes ----------
+let mlP;
+function loadMapLibre() {
+  if (window.maplibregl) return Promise.resolve();
+  mlP ||= new Promise((resolve, reject) => {
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = '/vendor/maplibre/maplibre-gl.css'; document.head.appendChild(l);
+    const sc = document.createElement('script'); sc.src = '/vendor/maplibre/maplibre-gl.js'; sc.onload = resolve; sc.onerror = () => reject(new Error('map library failed to load'));
+    document.head.appendChild(sc);
+  });
+  return mlP;
+}
+const DEM = { type: 'raster-dem', tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'], encoding: 'terrarium', tileSize: 256, maxzoom: 15, attribution: 'Terrain: Mapzen/AWS' };
+function skiStyle() {
+  return {
+    version: 8,
+    glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+    sources: { omt: { type: 'vector', url: 'https://tiles.openfreemap.org/planet' }, dem: DEM, shade: DEM },
+    terrain: { source: 'dem', exaggeration: 1.45 },
+    sky: { 'sky-color': '#9cc3f0', 'horizon-color': '#e8f1fb', 'fog-color': '#eef3f9', 'sky-horizon-blend': 0.6, 'horizon-fog-blend': 0.6, 'fog-ground-blend': 0.35 },
+    layers: [
+      { id: 'snow', type: 'background', paint: { 'background-color': '#f6f8fb' } },
+      { id: 'shade', type: 'hillshade', source: 'shade', paint: { 'hillshade-exaggeration': 0.75, 'hillshade-shadow-color': '#4d5f7a', 'hillshade-highlight-color': '#ffffff', 'hillshade-accent-color': '#8fa3bf', 'hillshade-illumination-direction': 315 } },
+      { id: 'forest', type: 'fill', source: 'omt', 'source-layer': 'landcover', filter: ['==', ['get', 'class'], 'wood'], paint: { 'fill-color': '#2f5d3a', 'fill-opacity': 0.5 } },
+      { id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water', paint: { 'fill-color': '#8ec0e8' } },
+      { id: 'roads', type: 'line', source: 'omt', 'source-layer': 'transportation', minzoom: 12, filter: ['in', ['get', 'class'], ['literal', ['primary', 'secondary', 'tertiary', 'minor', 'service']]], paint: { 'line-color': '#b9bec7', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 0.5, 16, 2.5] } },
+      { id: 'bldg', type: 'fill', source: 'omt', 'source-layer': 'building', minzoom: 14, paint: { 'fill-color': '#b89a7a', 'fill-opacity': 0.85 } },
+    ],
+  };
+}
+const RUN_COL = ['match', ['get', 'diff'], 'green', '#16a34a', 'blue', '#2563eb', 'black', '#111111', 'expert', '#111111', '#2563eb'];
+const fc = (features) => ({ type: 'FeatureCollection', features });
+const lineF = (coords, props) => ({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: coords.map(([la, lo]) => [lo, la]) } });
+
+// Which way is "up the mountain": average direction of the lifts, bottom → top (degrees clockwise from north).
+function upBearing(area) {
+  let x = 0, y = 0;
+  for (const l of area?.lifts || []) {
+    const a = l.coords[0], b = l.coords[l.coords.length - 1];
+    const dx = (b[1] - a[1]) * Math.cos(a[0] * Math.PI / 180), dy = b[0] - a[0];
+    x += dx; y += dy;
+  }
+  return x || y ? (Math.atan2(x, y) * 180 / Math.PI + 360) % 360 : 0;
+}
+// Summit at the top while you're below / riding up; base at the top once you're at the top or skiing down.
+function aiFacing() {
+  const t = AI.tracker, area = AI.area, f = AI.lastFix;
+  if (!area?.lifts?.length || !f) return 'up';
+  const p = [f.lat, f.lon];
+  const near = (pts) => Math.min(...pts.map((c) => dist(p, c)));
+  if (near(area.lifts.flatMap((l) => [l.coords[0], l.coords[l.coords.length - 1]])) > 3000) return 'up'; // away from the mountain
+  if (t?.state === 'lift') return 'up';
+  if (t?.state === 'run') return 'down';
+  const top = near(area.lifts.map((l) => l.coords[l.coords.length - 1])), bottom = near(area.lifts.map((l) => l.coords[0]));
+  return top < bottom && top < 250 ? 'down' : 'up';
+}
+function aiOrient(force) {
+  const map = AI.map; if (!map || !AI.area) return;
+  const facing = aiFacing();
+  if (!force && facing === AI.facing) return;
+  AI.facing = facing;
+  const up = upBearing(AI.area);
+  map.easeTo({ bearing: facing === 'up' ? up : (up + 180) % 360, pitch: 58, duration: force ? 0 : 1400 });
+}
+
 async function drawAIMap(day) {
   const el = document.getElementById('ai-map');
   if (!el) return;
-  try { await loadLeaflet(); } catch { el.innerHTML = '<p class="pad small muted">Map unavailable.</p>'; return; }
-  if (AI.map) AI.map.remove();
-  const map = L.map(el, { zoomControl: false, attributionControl: true }).setView([day.lat, day.lon], 14);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
-  AI.map = map;
-  AI.layers = { area: L.layerGroup().addTo(map), track: L.polyline([], { color: '#3987e5', weight: 4, opacity: .9 }).addTo(map), me: null, squad: L.layerGroup().addTo(map), labels: L.layerGroup().addTo(map) };
-  const COL = { green: '#1a9e3a', blue: '#2563eb', black: '#111', expert: '#111' };
-  if (AI.area) {
-    for (const r of AI.area.runs) L.polyline(r.coords, { color: COL[r.diff] || '#2563eb', weight: r.diff === 'expert' ? 2 : 3, opacity: .75, dashArray: r.diff === 'expert' ? '4 4' : null }).addTo(AI.layers.area).bindTooltip(`${r.name || 'Run'} · ${r.diff}`);
-    const b = L.latLngBounds(AI.area.lifts.flatMap((l) => l.coords));
-    if (b.isValid()) map.fitBounds(b.pad(0.05));
-  }
-  aiUpdate(true);
+  try { await loadMapLibre(); } catch { el.innerHTML = '<p class="pad small muted">Map unavailable.</p>'; return; }
+  if (!document.body.contains(el)) return;
+  if (AI.map) { try { AI.map.remove(); } catch {} }
+  let map;
+  try {
+    map = new maplibregl.Map({ container: el, style: skiStyle(), center: [day.lon, day.lat], zoom: 13.6, pitch: 58, bearing: upBearing(AI.area), maxPitch: 75, attributionControl: { compact: true }, antialias: true, fadeDuration: 0 });
+  } catch { el.innerHTML = '<p class="pad small muted">3D map needs WebGL, which isn\'t available here.</p>'; return; }
+  AI.map = map; AI.layers = { me: null, mates: [], lifts: [] }; AI.facing = null;
+  if (location.hostname === 'localhost') window.__aiMap = map;
+  map.once('style.load', () => {
+    map.addSource('runs', { type: 'geojson', data: fc((AI.area?.runs || []).map((r) => lineF(r.coords, { name: r.name, diff: r.diff }))) });
+    map.addSource('lifts', { type: 'geojson', data: fc([]) });
+    map.addSource('track', { type: 'geojson', data: fc([]) });
+    map.addLayer({ id: 'runs-casing', type: 'line', source: 'runs', paint: { 'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2, 16, 7], 'line-opacity': 0.8 } });
+    map.addLayer({ id: 'runs', type: 'line', source: 'runs', paint: { 'line-color': RUN_COL, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.2, 16, 4], 'line-dasharray': ['case', ['==', ['get', 'diff'], 'expert'], ['literal', [2, 1.2]], ['literal', [1, 0]]] } });
+    map.addLayer({ id: 'run-names', type: 'symbol', source: 'runs', minzoom: 14, layout: { 'symbol-placement': 'line', 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Bold'], 'text-size': 11, 'text-keep-upright': true },
+      paint: { 'text-color': RUN_COL, 'text-halo-color': '#ffffff', 'text-halo-width': 1.6 } });
+    map.addLayer({ id: 'lifts', type: 'line', source: 'lifts', paint: { 'line-color': ['case', ['get', 'closed'], '#9ca3af', '#dc2626'], 'line-width': 2.6 } });
+    map.addLayer({ id: 'track', type: 'line', source: 'track', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#f59e0b', 'line-width': 3.5 } });
+    if (AI.area?.lifts?.length) {
+      const ll = AI.area.lifts.flatMap((l) => l.coords.map(([la, lo]) => [lo, la]));
+      const b = ll.reduce((bb, c) => bb.extend(c), new maplibregl.LngLatBounds(ll[0], ll[0]));
+      map.fitBounds(b, { padding: 30, pitch: 58, bearing: upBearing(AI.area), duration: 0 });
+    }
+    AI.facing = null; aiOrient(true);
+    aiUpdate(true);
+  });
 }
 
 function aiMapLifts() {
-  if (!AI.map || !AI.area) return;
-  AI.layers.labels.clearLayers();
+  const map = AI.map; if (!map || !AI.area || !map.getSource('lifts')) return;
+  const feats = [];
+  AI.layers.lifts.forEach((m) => m.remove()); AI.layers.lifts = [];
   for (const l of AI.area.lifts) {
     const f = feedFor(l, AI.feed?.lifts);
-    const closed = f && f.status && f.status !== 'open';
-    L.polyline(l.coords, { color: closed ? '#9ca3af' : '#dc2626', weight: 2.5, opacity: .95 }).addTo(AI.layers.labels);
-    const top = l.coords[0];
-    const label = `${esc(l.name)}${f?.wait != null && !closed ? ` · <b>${f.wait}m</b>` : closed ? ' · closed' : ''}`;
-    L.marker(top, { icon: L.divIcon({ className: `ai-liftlbl${closed ? ' closed' : f?.wait >= 10 ? ' long' : ''}`, html: label, iconSize: null }) }).addTo(AI.layers.labels);
+    const closed = !!(f && f.status && f.status !== 'open');
+    feats.push(lineF(l.coords, { name: l.name, closed }));
+    const el = document.createElement('div');
+    el.className = `ai-liftlbl${closed ? ' closed' : f?.wait >= 10 ? ' long' : ''}`;
+    el.innerHTML = `${esc(l.name)}${f?.wait != null && !closed ? ` · <b>${f.wait}m</b>` : closed ? ' · closed' : ''}`;
+    const [la, lo] = l.coords[0];
+    AI.layers.lifts.push(new maplibregl.Marker({ element: el, anchor: 'top' }).setLngLat([lo, la]).addTo(map));
   }
+  map.getSource('lifts').setData(fc(feats));
 }
 
 function aiUpdate(full) {
@@ -2000,14 +2086,15 @@ function aiUpdate(full) {
   }
   const clock = document.getElementById('ai-clock'); if (clock) clock.textContent = aiClock();
   // map: track + me
-  if (AI.map && AI.layers) {
-    AI.layers.track.setLatLngs(t.pts.map((p) => [p.lat, p.lon]));
+  if (AI.map && AI.layers && AI.map.getSource?.('track')) {
+    AI.map.getSource('track').setData(fc(t.pts.length > 1 ? [lineF(t.pts.map((p) => [p.lat, p.lon]), {})] : []));
     if (AI.lastFix) {
-      const ll = [AI.lastFix.lat, AI.lastFix.lon];
-      if (!AI.layers.me) AI.layers.me = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 3, fillColor: '#3987e5', fillOpacity: 1 }).addTo(AI.map);
-      else AI.layers.me.setLatLng(ll);
+      const ll = [AI.lastFix.lon, AI.lastFix.lat];
+      if (!AI.layers.me) { const d = document.createElement('div'); d.className = 'ai-me'; AI.layers.me = new maplibregl.Marker({ element: d }).setLngLat(ll).addTo(AI.map); }
+      else AI.layers.me.setLngLat(ll);
     }
     if (full) aiMapLifts();
+    aiOrient();
   }
   if (full) aiPlan(cur, last);
   // stats
@@ -2105,9 +2192,12 @@ function renderSquad() {
     ? AI.squad.map((m) => `<div class="ai-mate"><span class="ai-av">${esc((m.name || '?')[0])}</span><div><b>${esc(m.name)}</b> <span class="small muted">${m.state === 'lift' ? `🚡 ${esc(m.lift || 'on a lift')}` : m.state === 'run' ? '⛷️ skiing' : '⏸'} · ${Math.max(0, Math.round((Date.now() - m.at) / 60000))}m ago</span>
         <div class="small secondary">${m.runs} runs · ${Number(m.vertFt).toLocaleString()} ft${m.plan ? ` · next: ${esc(m.plan)}` : ''}</div></div></div>`).join('')
     : `<p class="small muted">${AI.squadErr || 'Nobody else in the squad is out yet. Share the code!'}</p>`);
-  if (AI.map && AI.layers) {
-    AI.layers.squad.clearLayers();
-    for (const m of AI.squad) if (Number.isFinite(m.lat)) L.marker([m.lat, m.lon], { icon: L.divIcon({ className: 'ai-matepin', html: esc((m.name || '?')[0]), iconSize: [26, 26] }) }).addTo(AI.layers.squad).bindTooltip(m.name);
+  if (AI.map && AI.layers && window.maplibregl) {
+    AI.layers.mates.forEach((x) => x.remove()); AI.layers.mates = [];
+    for (const m of AI.squad) if (Number.isFinite(m.lat)) {
+      const d = document.createElement('div'); d.className = 'ai-matepin'; d.textContent = (m.name || '?')[0]; d.title = m.name;
+      AI.layers.mates.push(new maplibregl.Marker({ element: d }).setLngLat([m.lon, m.lat]).addTo(AI.map));
+    }
   }
 }
 

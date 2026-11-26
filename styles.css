@@ -797,3 +797,9 @@ body.has-tabs { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
 html[data-theme="light"] .tabbar { background: rgba(255,255,255,.58); box-shadow: 0 8px 28px rgba(15,20,30,.18), inset 0 0 0 .5px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.6); }
 html[data-theme="light"] .tabbar a { color: rgba(20,24,30,.7); }
 html[data-theme="light"] .tabbar a.on { color: #111; background: rgba(255,255,255,.75); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+
+.ai-map { height: 52vh; min-height: 320px; background: #eef3f9; }
+.ai-me { width: 18px; height: 18px; border-radius: 50%; background: #3987e5; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(57,135,229,.25), 0 2px 6px rgba(0,0,0,.35); }
+.ai-matepin { width: 26px; height: 26px; }
+.ai-liftlbl { transform: none; }
+.ai-mapcard .maplibregl-ctrl-attrib { font-size: 9px; }

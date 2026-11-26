@@ -2802,6 +2802,14 @@ async function hardRefresh() {
   }, { passive: true });
 })();
 
+// Keep a spacer the exact height of the fixed top bar (it changes with the safe area / rotation).
+(() => {
+  const tb = document.querySelector('.topbar'); if (!tb) return;
+  const set = () => document.documentElement.style.setProperty('--tb-h', `${tb.offsetHeight}px`);
+  set(); addEventListener('resize', set); addEventListener('orientationchange', set);
+  try { new ResizeObserver(set).observe(tb); } catch {}
+})();
+
 // ---------- bottom tabs: Forecast · Powder AI ----------
 (() => {
   const nav = document.createElement('nav');

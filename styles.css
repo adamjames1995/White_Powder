@@ -860,3 +860,10 @@ html[data-theme="light"] .tabbar a.on { color: #111; background: rgba(255,255,25
 
 .ft-stay { border-left: 4px solid #f59e0b; }
 .ft-stay.strong { border-left-color: #ef4444; }
+
+/* iOS 26 draws a soft blur under the status bar over whatever scrolls there — which smeared the logo and icons.
+   A header that is position:fixed at the very top with its own opaque colour is treated as the status-bar
+   background instead (no blur). Same size and position as before; a spacer keeps the layout identical. */
+.topbar { position: fixed; top: 0; left: 0; right: 0; background: #161615; }
+html[data-theme="light"] .topbar { background: #161615; }
+body:not(.detail) { padding-top: var(--tb-h, 0px); }

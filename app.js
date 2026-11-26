@@ -1633,8 +1633,113 @@ function modal(html) {
   return el;
 }
 
+/** Build and save a starting list (first run), then start the tour. */
+async function setupStart(entries, el, note, msg) {
+  const built = [];
+  for (const [k, c] of entries.entries()) {
+    msg?.(`Setting up ${c.name}… (${k + 1}/${entries.length})`);
+    if (built.some((r) => r.name.toLowerCase() === c.name.toLowerCase())) continue;
+    built.push(await buildMountain(c, built));
+  }
+  RESORTS = built; saveMountains(RESORTS);
+  FAVS = new Set(built.map((r) => r.id)); saveFavorites(FAVS);
+  const pr = getPrefs(); pr.resorts = built.map((r) => r.id); setPrefs(pr);
+  localStorage.setItem(VIEW_KEY, 'fav');
+  el.remove();
+  refresh(true);
+  showTutorial(note);
+}
+
+/** First run, after the donation pop-up: closest mountains, or pick your own. */
+function startChoice() {
+  const el = modal(`
+    <img src="/icons/icon-192.png" alt="" width="64" height="64" style="border-radius:14px" />
+    <h2>Let's set up your mountains</h2>
+    <p>Start with the resorts closest to you, or pick your favorites.</p>
+    <button class="btn primary block ob-big" id="ob-near">📍 Closest to me</button>
+    <button class="btn block ob-big" id="ob-pick">⭐ Pick my favorites</button>
+    <button class="btn block ob-skipline" id="ob-skip">Skip — start with the West Coast five</button>`);
+  el.querySelector('#ob-near').onclick = () => { el.remove(); startNearby(); };
+  el.querySelector('#ob-pick').onclick = () => { el.remove(); startPicker(); };
+  el.querySelector('#ob-skip').onclick = () => { el.remove(); showTutorial(); };
+}
+
+function startNearby() {
+  const el = modal(`
+    <h2>Mountains near you</h2>
+    <p>Use your location, or type a ZIP code or town.</p>
+    <button class="btn primary block" id="ob-gps">📍 Use my location</button>
+    <form id="ob-form" class="ob-form">
+      <input id="ob-zip" class="search" autocomplete="postal-code" placeholder="ZIP code or town" />
+      <button class="btn block" id="ob-go">Find mountains</button>
+    </form>
+    <p id="ob-msg" class="small muted" style="min-height:18px"></p>
+    <button class="btn block ob-skipline" id="ob-back">‹ Back</button>`);
+  const msg = (t, err) => { const m = el.querySelector('#ob-msg'); m.textContent = t; m.className = `small ${err ? 'err' : 'muted'}`; };
+  const go = async (loc) => {
+    if (!loc) { msg("Couldn't find that place — try a ZIP code or town.", true); return; }
+    setHome({ lat: loc.lat, lon: loc.lon, label: loc.label });
+    const picks = pickNearby(loc.lat, loc.lon, loc.state);
+    el.querySelectorAll('button, input').forEach((x) => { x.disabled = true; });
+    await setupStart(picks.map((p) => p.c), el, `Added ${picks.length} mountains near ${loc.label}.`, msg);
+  };
+  el.querySelector('#ob-back').onclick = () => { el.remove(); startChoice(); };
+  el.querySelector('#ob-gps').onclick = () => {
+    if (!navigator.geolocation) return msg('Location isn\'t available — type a ZIP code instead.', true);
+    msg('Finding you…');
+    navigator.geolocation.getCurrentPosition(async (p) => {
+      const lat = p.coords.latitude, lon = p.coords.longitude;
+      // name the place (and state, which helps pick in-state resorts)
+      let state = '', label = 'your location';
+      try {
+        const pr = (await (await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}`)).json()).features?.[0]?.properties || {};
+        state = pr.state || ''; const town = pr.city || pr.town || pr.village || pr.county;
+        if (town) label = [town, ABBR[state] || state].filter(Boolean).join(', ');
+      } catch {}
+      go({ lat, lon, label, state });
+    }, () => msg('Couldn\'t get your location — allow it in Settings or type a ZIP code.', true), { enableHighAccuracy: false, timeout: 12000, maximumAge: 600000 });
+  };
+  el.querySelector('#ob-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const q = el.querySelector('#ob-zip').value.trim(); if (!q) return;
+    msg('Finding you…');
+    go(await locate(q).catch(() => null));
+  };
+}
+
+function startPicker() {
+  const pool = [...DEFAULT_RESORTS, ...CATALOG.filter((c) => !DEFAULT_RESORTS.some((d) => d.name.toLowerCase() === c.name.toLowerCase()))];
+  const chosen = new Set();
+  const el = modal(`
+    <h2>Pick your mountains</h2>
+    <input id="pk-q" class="search" type="search" placeholder="Search resorts or states…" />
+    <div id="pk-list" class="pk-list"></div>
+    <p id="pk-msg" class="small muted" style="min-height:18px"></p>
+    <button class="btn primary block" id="pk-done" disabled>Add 0 mountains</button>
+    <button class="btn block ob-skipline" id="pk-back">‹ Back</button>`);
+  const list = el.querySelector('#pk-list'), done = el.querySelector('#pk-done');
+  const draw = () => {
+    const q = el.querySelector('#pk-q').value.trim().toLowerCase();
+    const items = pool.filter((c) => !q || `${c.name} ${c.state || ''} ${c.country || ''} ${c.region || ''}`.toLowerCase().includes(q));
+    const sorted = [...items.filter((c) => chosen.has(c.name)), ...items.filter((c) => !chosen.has(c.name))];
+    list.innerHTML = sorted.map((c) => `<label class="pk-item"><input type="checkbox" data-n="${esc(c.name)}" ${chosen.has(c.name) ? 'checked' : ''}/><span><b>${esc(c.name)}</b><span class="small muted"> ${esc(placeAbbr(c))}${passOf(c) ? ` · ${PASSES[passOf(c)]}` : ''}</span></span></label>`).join('') || '<p class="small muted">No matches — you can add any resort later with +.</p>';
+    list.querySelectorAll('input').forEach((cb) => cb.addEventListener('change', () => { cb.checked ? chosen.add(cb.dataset.n) : chosen.delete(cb.dataset.n); count(); }));
+  };
+  const count = () => { done.disabled = !chosen.size; done.textContent = `Add ${chosen.size} mountain${chosen.size === 1 ? '' : 's'}`; };
+  el.querySelector('#pk-q').addEventListener('input', draw);
+  el.querySelector('#pk-back').onclick = () => { el.remove(); startChoice(); };
+  done.onclick = async () => {
+    const picks = pool.filter((c) => chosen.has(c.name));
+    el.querySelectorAll('button, input').forEach((x) => { x.disabled = true; });
+    const msg = (t) => { el.querySelector('#pk-msg').textContent = t; };
+    await setupStart(picks, el, `Added ${picks.length} of your favorite mountains.`, msg);
+  };
+  draw(); count();
+}
+
 function startOnboarding({ zipStep = !hasSavedMountains(), addMode = false } = {}) {
   if (!zipStep) return showTutorial();
+  if (!addMode) return startChoice();
   const el = modal(`
     <img src="/icons/icon-192.png" alt="" width="64" height="64" style="border-radius:14px" />
     <h2>${addMode ? 'Mountains near you' : 'Welcome to White Powder'}</h2>

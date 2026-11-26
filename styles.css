@@ -888,3 +888,9 @@ body:not(.detail) { padding-top: var(--tb-h, 0px); }
 html[data-theme="light"] .rc-title .sub .wxmini.heavy, html[data-theme="light"] .rc-title .sub .wxmini.blizzard { color: #1d4f91; }
 .powmini { font-size: 13px; }
 .powmini b { font-size: 10px; }
+
+.ob-big { padding: 14px; font-size: 17px; margin-top: 8px; }
+.ob-skipline { background: none; border: 0; color: var(--text-secondary); margin-top: 6px; }
+.pk-list { max-height: 46vh; overflow: auto; margin: 8px 0; text-align: left; border-top: 1px solid var(--border); }
+.pk-item { display: flex; gap: 10px; align-items: center; padding: 9px 2px; border-bottom: 1px solid var(--border); }
+.pk-item input { width: 20px; height: 20px; flex: none; }

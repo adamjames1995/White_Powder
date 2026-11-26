@@ -1,6 +1,7 @@
 import { loadSkiArea, dist } from '/lib/skiarea.js';
 import { DayTracker } from '/lib/track.js';
 import { plan, feedFor, LEVELS as AI_LEVELS, SNOW } from '/lib/plan.js';
+import { VEHICLE_DEFAULT, chainLevel, chainAdvice, passAdvice, pickLeave, powderPick, packList, sampleRoute, googleMapsUrl, appleMapsUrl, fmtDur } from '/lib/drive.js';
 import { CATALOG, logoUrl, openingFor, passOf, PASSES, slug, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS, midFt } from '/lib/snow.js';
 import { fetchDetail, compass } from '/lib/detail.js';
@@ -184,6 +185,7 @@ function render() {
   if (view === 'settings') return renderSettings();
   if (view === 'manage') return renderManage();
   if (view === 'ai') return renderAI();
+  if (view === 'drive') return renderDrive();
   renderHome();
 }
 
@@ -2201,6 +2203,184 @@ function renderSquad() {
   }
 }
 
+// =====================================================================
+// ---------- First Tracks: when to leave, road + chain conditions, route weather, cams, map links ----------
+// =====================================================================
+const VEH_KEY = 'wp:vehicle:v1', FT_KEY = 'wp:ft:v1';
+const getVehicle = () => { try { const v = JSON.parse(localStorage.getItem(VEH_KEY) || 'null'); return v ? { ...VEHICLE_DEFAULT, ...v } : null; } catch { return null; } };
+const setVehicle = (v) => { try { localStorage.setItem(VEH_KEY, JSON.stringify(v)); } catch {} };
+const ftPrefs = () => { try { return { dest: '', day: 0, chair: '', ...JSON.parse(localStorage.getItem(FT_KEY) || '{}') }; } catch { return { dest: '', day: 0, chair: '' }; } };
+const setFt = (p) => { try { localStorage.setItem(FT_KEY, JSON.stringify({ ...ftPrefs(), ...p })); } catch {} };
+const FIRST_CHAIR = { whistler: '08:30' };
+const ftCache = new Map();
+const VEH_LABEL = { '2wd': '2WD', awd: 'AWD', '4wd': '4WD' };
+
+function vehicleEditor(v, id = 'veh') {
+  const seg = (k, opts) => `<div class="seg-ctl ai-seg" data-veh="${k}">${Object.entries(opts).map(([x, l]) => `<button data-v="${x}" class="${String(v[k]) === x ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  return `<div class="stack" id="${id}">
+    <div class="ai-lbl">Drive${seg('drive', { '2wd': '2WD', awd: 'AWD', '4wd': '4WD' })}</div>
+    <div class="ai-lbl">Tires${seg('tires', { allseason: 'All-season', snow: 'Snow (M+S / ❄︎)' })}</div>
+    <div class="ai-lbl">Chains in the car${seg('chains', { true: 'Yes', false: 'No' })}</div>
+  </div>`;
+}
+function wireVehicle(root, onChange) {
+  root.querySelectorAll('[data-veh] button').forEach((b) => b.addEventListener('click', () => {
+    const v = getVehicle() || { ...VEHICLE_DEFAULT };
+    const k = b.closest('[data-veh]').dataset.veh;
+    v[k] = k === 'chains' ? b.dataset.v === 'true' : b.dataset.v;
+    setVehicle(v);
+    b.parentElement.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+    onChange?.();
+  }));
+}
+
+function renderDrive() {
+  const p = ftPrefs(), home = getHome(), v = getVehicle();
+  const mts = aiMountains();
+  const favFirst = [...RESORTS.filter((r) => FAVS.has(r.id)).map((r) => r.id)];
+  const dest = mts.find((m) => m.id === p.dest) || mts.find((m) => m.id === favFirst[0]) || mts[0];
+  const chair = p.chair || FIRST_CHAIR[dest.id] || '09:00';
+  const dayNames = [0, 1, 2, 3].map((k) => (k === 0 ? 'Today' : k === 1 ? 'Tomorrow' : new Date(Date.now() + k * 864e5).toLocaleDateString('en-US', { weekday: 'short' })));
+  app.innerHTML = `
+    <h1 class="title ai-title">🚗 First Tracks</h1>
+    <section class="card pad stack ft-controls">
+      <label class="ai-lbl">Heading to <select id="ft-dest">${mts.map((m) => `<option value="${esc(m.id)}" ${m.id === dest.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
+      <div class="ft-row"><button class="linkbtn" id="ft-from">📍 From ${home ? esc(home.label) : 'your location'} · change</button></div>
+      <div class="seg-ctl ai-seg" id="ft-day">${dayNames.map((n, k) => `<button data-d="${k}" class="${k === p.day ? 'on' : ''}">${n}</button>`).join('')}</div>
+      <label class="ai-lbl ft-inline">First chair <select id="ft-chair">${['07:30', '08:00', '08:30', '09:00', '09:30', '10:00'].map((t) => `<option ${t === chair ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      ${v ? `<div class="small secondary">🚙 ${VEH_LABEL[v.drive]} · ${v.tires === 'snow' ? 'snow tires' : 'all-season tires'} · ${v.chains ? 'chains in car' : 'no chains'} · <button class="linkbtn" id="ft-veh">edit</button></div>` : ''}
+    </section>
+    ${v ? '' : `<section class="card pad stack" id="ft-vehcard"><h3 style="margin:0">Your vehicle</h3><p class="small muted">Chain-control advice depends on it. Set it once (also in Settings).</p>${vehicleEditor({ ...VEHICLE_DEFAULT, drive: '', tires: '', chains: '' })}<button class="btn primary" id="ft-vehsave">Save vehicle</button></section>`}
+    <div id="ft-body"><div class="card pad"><p class="muted">Planning your drive…</p></div></div>`;
+  document.getElementById('ft-dest').addEventListener('change', (e) => { setFt({ dest: e.target.value, chair: '' }); renderDrive(); });
+  document.getElementById('ft-chair').addEventListener('change', (e) => { setFt({ chair: e.target.value }); renderDrive(); });
+  document.querySelectorAll('#ft-day button').forEach((b) => b.addEventListener('click', () => { setFt({ day: Number(b.dataset.d) }); renderDrive(); }));
+  document.getElementById('ft-from').addEventListener('click', async () => { if (await askHome()) { ftCache.clear(); renderDrive(); } });
+  document.getElementById('ft-veh')?.addEventListener('click', () => {
+    const m = modal(`<h3>Your vehicle</h3>${vehicleEditor(getVehicle())}<button class="btn primary" id="veh-ok">Done</button>`);
+    wireVehicle(m); m.querySelector('#veh-ok').onclick = () => { m.remove(); renderDrive(); };
+  });
+  const vc = document.getElementById('ft-vehcard');
+  if (vc) { wireVehicle(vc); vc.querySelector('#ft-vehsave').onclick = () => { if (!getVehicle()) setVehicle({ ...VEHICLE_DEFAULT }); renderDrive(); }; }
+  planDrive(dest, Number(p.day) || 0, chair);
+}
+
+async function ftOrigin() {
+  const h = getHome();
+  if (h) return [h.lat, h.lon];
+  const g = await new Promise((res) => navigator.geolocation ? navigator.geolocation.getCurrentPosition((x) => res([x.coords.latitude, x.coords.longitude]), () => res(null), { timeout: 10000, maximumAge: 600000 }) : res(null));
+  if (g) setHome({ lat: g[0], lon: g[1], label: 'your location' });
+  return g;
+}
+
+async function planDrive(dest, dayOffset, chair) {
+  const body = () => document.getElementById('ft-body');
+  const stillHere = () => location.hash.startsWith('#/drive') && body();
+  const from = await ftOrigin();
+  if (!stillHere()) return;
+  if (!from) { body().innerHTML = '<div class="card pad"><p>Set where you\'re starting from (📍 above) to plan the drive.</p></div>'; return; }
+  const to = [dest.lat, dest.lon];
+  const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+  const dayStart = day0.getTime() + dayOffset * 864e5;
+  const [hh, mm] = chair.split(':').map(Number);
+  // candidate departures for the traffic forecast: every 30 min in the 3 hours before first chair
+  const key = `${from.join()}|${dest.id}|${dayOffset}|${chair}`;
+  let d = ftCache.get(key);
+  try {
+    if (!d || Date.now() - d.at > 5 * 60e3) {
+      const base = await getJSON(`/api/firsttracks?flat=${from[0]}&flon=${from[1]}&tlat=${to[0]}&tlon=${to[1]}`);
+      const chairMs = dayStart + hh * 3600e3 + mm * 60e3;
+      const departs = [];
+      if (base.traffic) for (let k = 0; k < 7; k++) { const t = chairMs - 30 * 60e3 - base.routes[0].min * 60e3 - (90 - k * 30) * 60e3; if (t > Date.now()) departs.push(new Date(Math.round(t / 900e3) * 900e3).toISOString().slice(0, 19)); }
+      const times = departs.length ? (await getJSON(`/api/firsttracks?flat=${from[0]}&flon=${from[1]}&tlat=${to[0]}&tlon=${to[1]}&departs=${departs.join(',')}`).catch(() => ({ times: [] }))).times : [];
+      const pts = sampleRoute(base.routes[0].coords, 18);
+      const wx = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${pts.map((x) => x.lat.toFixed(4)).join(',')}&longitude=${pts.map((x) => x.lon.toFixed(4)).join(',')}&hourly=temperature_2m,snowfall,precipitation,weather_code&temperature_unit=fahrenheit&precipitation_unit=inch&timeformat=unixtime&forecast_days=5`).catch(() => null);
+      const arr = Array.isArray(wx) ? wx : wx ? [wx] : [];
+      const named = [...(base.chains || []), ...(base.passes || []), ...(base.cams || [])];
+      const samples = pts.map((pt, i) => {
+        const w = arr[i]; if (!w?.hourly) return null;
+        const near = named.map((n) => ({ n, d: Math.hypot(n.lat - pt.lat, (n.lon - pt.lon) * Math.cos(pt.lat * Math.PI / 180)) })).sort((a, b) => a.d - b.d)[0];
+        const name = pt.frac === 1 ? dest.name : near && near.d < 0.05 ? titleCase(near.n.place || near.n.name || '') : `Mile ${Math.round(pt.frac * base.routes[0].km * 0.621)}`;
+        return { ...pt, name, elevFt: Math.round((w.elevation || 0) * 3.281), hourly: { t: w.hourly.time.map((x) => x * 1000), snow: w.hourly.snowfall, temp: w.hourly.temperature_2m, precip: w.hourly.precipitation, code: w.hourly.weather_code } };
+      }).filter(Boolean);
+      d = { at: Date.now(), base, times, samples };
+      ftCache.set(key, d);
+    }
+  } catch (e) {
+    if (stillHere()) body().innerHTML = `<div class="card pad"><p class="err">Couldn't plan the drive right now.</p><p class="small muted">${esc(e.message || e)}</p></div>`;
+    return;
+  }
+  if (!stillHere()) return;
+  const { base, times, samples } = d;
+  const v = getVehicle() || { ...VEHICLE_DEFAULT };
+  const route = base.routes[0];
+  const live = dayOffset === 0 || (dayStart - Date.now() < 18 * 3600e3);
+  const chains = base.chains.map((c) => ({ ...c, level: chainLevel(c.status, c.text) }));
+  const chainMax = live ? Math.max(0, ...chains.map((c) => c.level)) : 0;
+  const plan = pickLeave({ dayStart, firstChair: chair, baseMin: route.min, times, samples, chainLevelMax: chainMax, now: Date.now() });
+  const resortSample = samples.find((s) => s.frac === 1);
+  const pow = powderPick(resortSample?.hourly, samples.filter((s) => s.frac < 1), 4);
+  const inDay = (s) => s.hourly.t.map((t, i) => [t, i]).filter(([t]) => t >= plan.leave && t <= plan.arrive);
+  const snowOnRoad = Math.max(0, ...samples.map((s) => inDay(s).reduce((a, [, i]) => a + (s.hourly.snow[i] || 0), 0)));
+  const minTemp = Math.min(60, ...samples.flatMap((s) => inDay(s).map(([, i]) => s.hourly.temp[i])).filter(Number.isFinite));
+  const bc = route.coords.some(([la, lo]) => la > 49.0 && lo < -114), wa = route.coords.some(([la, lo]) => la > 45.6 && la < 49 && lo < -116.9);
+  const pack = packList({ v, chainMax, snowOnRoad, minTemp, bc, wa });
+  const active = chains.filter((c) => c.level > 0);
+  const passes = base.passes || [];
+  const closures = (base.closures || []).filter((c) => c.full);
+  const alerts = (base.alerts || []).filter((a) => a.closed || /CLOSURE|INCIDENT|MAJOR|closed/i.test(`${a.kind} ${a.text}`)).slice(0, 8);
+  const gUrl = googleMapsUrl(from, dest.name, null, route.coords), aUrl = appleMapsUrl(from, dest.name, null);
+  const fmtT = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const highest = [...samples].sort((a, b) => b.elevFt - a.elevFt).slice(0, 3);
+  const wxRows = [...new Set([...highest, samples[samples.length - 1]])].sort((a, b) => a.frac - b.frac).map((s) => {
+    const eta = plan.leave + s.frac * plan.driveMin * 60e3;
+    const i = Math.max(0, s.hourly.t.findIndex((t) => t > eta) - 1);
+    const snow = s.hourly.snow[i] || 0, temp = Math.round(s.hourly.temp[i]);
+    return `<div class="ft-wx"><div><b>${esc(s.name)}</b><div class="small muted">${s.elevFt.toLocaleString()} ft · ~${fmtT(eta)}</div></div>
+      <div class="ft-wx-v">${wmoIcon(s.hourly.code[i])} ${temp}°F${snow >= 0.05 ? ` · <b class="${snow >= 0.5 ? 'err' : ''}">${snow.toFixed(1)}"/hr</b>` : ''}</div></div>`;
+  }).join('');
+  body().innerHTML = `
+    <section class="card pad ft-verdict">
+      <div class="ft-leave-k">${plan.late ? 'Leave now' : 'Leave by'}</div>
+      <div class="ft-leave">${plan.late ? fmtT(Date.now()) : fmtT(plan.leave)}</div>
+      <ul class="ft-reasons">${plan.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+      ${!base.traffic ? '<p class="small muted">Traffic isn\'t included yet (needs the free TomTom key).</p>' : ''}
+      ${pow.best ? `<div class="ft-pow">❄️ Powder pick: <b>${pow.best.day === dayStart ? 'this day' : new Date(pow.best.day).toLocaleDateString('en-US', { weekday: 'long' })}</b> — ${pow.best.overnight.toFixed(0)}" overnight at ${esc(dest.name)}${pow.best.road >= 1 ? `, ${pow.best.road.toFixed(0)}" on the road that morning` : ', roads mostly clear'}.</div>` : ''}
+    </section>
+    <section class="card pad">
+      <h3 style="margin:0 0 6px">Chains & road conditions</h3>
+      ${!live ? '<p class="small muted">Live chain controls apply to today; check again the night before.</p>' : ''}
+      ${active.length ? active.map((c) => { const a = chainAdvice(c.level, v); return `<div class="ft-cc ${a.ok ? 'ok' : 'bad'}"><b>${esc(c.route || '')} · ${esc(titleCase(c.place || ''))}</b><div class="small">${esc(a.text)}</div></div>`; }).join('')
+        : chains.length ? `<div class="ft-cc ok"><b>No chain controls on your route</b><div class="small muted">Checked ${chains.length} Caltrans chain-control points.</div></div>` : ''}
+      ${passes.map((ps) => `<div class="ft-cc ${ps.restrictions.every((r) => passAdvice(r.text, v).ok) ? 'ok' : 'bad'}"><b>${esc(ps.name)}</b> <span class="small muted">${ps.elevFt ? `${ps.elevFt.toLocaleString()} ft` : ''}</span>
+        <div class="small">${esc(ps.road || '')}${ps.weather ? ` · ${esc(ps.weather)}` : ''}</div>
+        ${ps.restrictions.map((r) => `<div class="small"><b>${esc(r.dir || '')}:</b> ${esc(r.text)}</div>`).join('')}</div>`).join('')}
+      ${closures.map((c) => `<div class="ft-cc bad"><b>Closure · ${esc(c.route || '')}</b><div class="small">${esc(titleCase(c.place || ''))} — ${esc(c.text)}</div></div>`).join('')}
+      ${alerts.map((a) => `<div class="ft-cc ${a.closed ? 'bad' : 'warn'}"><b>${esc(a.route || 'Alert')}</b> <span class="small muted">${esc(a.kind || '')}</span><div class="small">${esc(String(a.text || '').slice(0, 220))}</div></div>`).join('')}
+      ${bc ? `<div class="ft-cc ${v.tires === 'snow' ? 'ok' : 'warn'}"><b>BC winter tire rule</b><div class="small">Winter tires (M+S or mountain/snowflake) are required on Hwy 99 Oct 1 – Apr 30.</div></div>` : ''}
+      ${!chains.length && !passes.length && !alerts.length && !bc ? '<p class="small muted">No live road-condition feed covers this route — check the state DOT before you go.</p>' : ''}
+    </section>
+    <section class="card pad"><h3 style="margin:0 0 6px">Weather on the drive</h3>${wxRows || '<p class="small muted">Weather unavailable.</p>'}</section>
+    <section class="card pad"><h3 style="margin:0 0 6px">Pack for this trip</h3>
+      ${pack.map((it) => `<label class="opt ft-pack ${it.must ? 'must' : ''}"><input type="checkbox"/> ${esc(it.t)}</label>`).join('')}</section>
+    <section class="card pad"><h3 style="margin:0 0 6px">Route</h3>
+      ${base.routes.map((r, k) => `<div class="ft-route ${k ? '' : 'best'}"><b>${k ? `Option ${k + 1}` : 'Best route'}</b> · ${fmtDur(r.min)} · ${Math.round(r.km * 0.621)} mi${r.delayMin >= 3 ? ` · <span class="err">+${Math.round(r.delayMin)} min traffic now</span>` : ''}</div>`).join('')}
+      <div class="ft-maps"><a class="btn primary" href="${esc(gUrl)}" target="_blank" rel="noopener">Open in Google Maps</a><a class="btn" href="${esc(aUrl)}" target="_blank" rel="noopener">Apple Maps</a></div>
+      <p class="small muted">Google follows this exact route. Apple Maps picks its own route to ${esc(dest.name)}.</p></section>
+    ${base.cams.length ? `<section class="section"><h3>Cams along the way</h3><div class="ft-cams">${base.cams.map((c, i) => `<button class="ft-cam" data-cam="${i}"><img src="${esc(c.img)}" alt="" loading="lazy" onerror="this.closest('.ft-cam').remove()"/><span>${esc(titleCase(c.name || ''))}</span></button>`).join('')}</div></section>` : ''}
+    <p class="small muted ft-src">Road data: ${[chains.length && 'Caltrans', passes.length && 'WSDOT', bc && 'DriveBC'].filter(Boolean).join(', ') || '—'} · Weather: Open-Meteo · ${base.traffic ? 'Traffic: TomTom' : 'Routing: OSRM'} · as of ${fmtT(Date.parse(base.fetchedAt))}</p>`;
+  body().querySelectorAll('[data-cam]').forEach((b) => b.addEventListener('click', () => {
+    const c = base.cams[Number(b.dataset.cam)];
+    const m = modal(`<div class="cam-h"><b>${esc(titleCase(c.name || 'Highway cam'))}</b><button class="circ sm" id="fc-x" aria-label="Close">✕</button></div>
+      <img class="ft-cam-big" src="${esc(c.img)}${c.img.includes('?') ? '&' : '?'}t=${Date.now()}" alt=""/>
+      <p class="small muted">${esc(c.src)}${c.route ? ` · ${esc(c.route)}` : ''} · snapshot refreshes every few minutes${c.video ? ` · <a href="${esc(c.video)}" target="_blank" rel="noopener">live video ↗</a>` : ''}</p>`);
+    m.querySelector('#fc-x').onclick = () => m.remove();
+    m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+  }));
+}
+const wmoIcon = (c) => (c >= 95 ? '⛈️' : c >= 85 || (c >= 71 && c <= 77) ? '🌨️' : c >= 61 || (c >= 51 && c <= 57) || (c >= 80 && c <= 82) ? '🌧️' : c >= 45 && c <= 48 ? '🌫️' : c >= 2 ? '☁️' : '☀️');
+const titleCase = (s) => String(s).toLowerCase().replace(/(^|[\s(/-])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(Sr|Us|I|Ca|Hwy|Mp)\b/g, (x) => x.toUpperCase());
+
 // ---------- in-app resort webcams (tap to play the resort's own live player) ----------
 function openCam(name, embed, r) {
   const el = modal(`
@@ -2279,6 +2459,11 @@ async function renderSettings() {
       <p class="small muted">${theme === 'system' ? 'Follows your iPhone\'s Light/Dark setting.' : theme === 'time' ? 'Light from 7 AM to 6 PM, dark the rest of the time.' : ''}</p>
     </section>
     <section class="section stack">
+      <h3>Your vehicle</h3>
+      ${vehicleEditor(getVehicle() || { ...VEHICLE_DEFAULT })}
+      <p class="small muted">First Tracks uses this for chain-control and tire advice.</p>
+    </section>
+    <section class="section stack">
       <h3>Powder alerts · when to alert</h3>
       <label>Notify me when a resort's summit forecast hits
         <select id="thr">${[3, 4, 6, 8, 10, 12, 18, 24].map((v) => `<option value="${v}" ${v === prefs.threshold ? 'selected' : ''}>${v}"</option>`).join('')}</select>
@@ -2313,6 +2498,7 @@ async function renderSettings() {
     if (s) { try { await postSub({ action: 'save', subscription: s.toJSON(), prefs: p }); msg('Saved.'); } catch (e) { msg(`Couldn't save to server: ${e.message}`, true); } }
   };
   app.querySelectorAll('select, input[type=checkbox]:not(#cam-auto)').forEach((el) => el.addEventListener('change', save));
+  wireVehicle(app, () => { if (!localStorage.getItem(VEH_KEY)) setVehicle({ ...VEHICLE_DEFAULT }); });
   app.querySelectorAll('[data-theme-opt]').forEach((b) => b.addEventListener('click', () => {
     try { localStorage.setItem('wp:theme:v1', b.dataset.themeOpt); } catch {}
     window.wpTheme?.(); renderSettings();
@@ -2545,12 +2731,13 @@ async function hardRefresh() {
 (() => {
   const nav = document.createElement('nav');
   nav.className = 'tabbar';
-  nav.innerHTML = `<a href="#/" data-tab="fc"><span>❄️</span>Forecast</a><a href="#/ai" data-tab="ai"><span>⚡</span>Powder AI<i class="ai-live" hidden></i></a>`;
+  nav.innerHTML = `<a href="#/" data-tab="fc"><span>❄️</span>Forecast</a><a href="#/drive" data-tab="drive"><span>🚗</span>First Tracks</a><a href="#/ai" data-tab="ai"><span>⚡</span>Powder AI<i class="ai-live" hidden></i></a>`;
   document.body.appendChild(nav);
   document.body.classList.add('has-tabs');
   const sync = () => {
-    const ai = location.hash.startsWith('#/ai');
-    nav.querySelector('[data-tab=fc]').classList.toggle('on', !ai);
+    const ai = location.hash.startsWith('#/ai'), dr = location.hash.startsWith('#/drive');
+    nav.querySelector('[data-tab=fc]').classList.toggle('on', !ai && !dr);
+    nav.querySelector('[data-tab=drive]').classList.toggle('on', dr);
     nav.querySelector('[data-tab=ai]').classList.toggle('on', ai);
     nav.querySelector('.ai-live').hidden = !aiDay(); // red dot while a ski day is being tracked
   };

@@ -158,15 +158,31 @@ async function drivebc(bx, line) {
         alerts.push({ src: 'DriveBC', route: road.name, text: e.description || e.headline, kind: `${e.event_type}${e.severity ? ` · ${e.severity}` : ''}`, closed: /CLOSED/i.test(road.state || ''), lat: p[0], lon: p[1], frac: a.frac });
       }
     }).catch((e) => errors.push(`bc events: ${e.message}`)),
-    get('https://images.drivebc.ca/webcam/api/v1/webcams?format=json').then((j) => {
-      for (const c of j.webcams || j || []) {
-        const la = num(c.location?.latitude), lo = num(c.location?.longitude); if (la == null || !inBox(bx, la, lo) || c.isOn === false) continue;
+    get('https://www.drivebc.ca/api/webcams/', 12000).then((j) => {
+      for (const c of Array.isArray(j) ? j : j.webcams || []) {
+        const co = c.location?.coordinates; if (!co || c.is_on === false || c.should_appear === false) continue;
+        const la = num(co[1]), lo = num(co[0]); if (la == null || !inBox(bx, la, lo)) continue;
         const a = along(line, la, lo); if (a.d > 800) continue;
-        cams.push({ src: 'DriveBC', name: c.camName || c.caption, route: c.highway?.number ? `Hwy ${c.highway.number}` : '', lat: la, lon: lo, frac: a.frac, img: c.links?.imageDisplay || `https://images.drivebc.ca/bchighwaycam/pub/cameras/${c.id}.jpg` });
+        const rel = c.links?.imageDisplay || `/images/${c.id}.jpg`;
+        cams.push({ src: 'DriveBC', name: c.name, route: c.highway ? `Hwy ${c.highway}` : '', lat: la, lon: lo, frac: a.frac, img: rel.startsWith('http') ? rel : `https://www.drivebc.ca${rel}` });
       }
     }).catch((e) => errors.push(`bc cams: ${e.message}`)),
   ]);
   return { alerts, cams, errors };
+}
+
+// Even coverage along the drive: at most a few cams per stretch, weighted toward the mountain end.
+function spread(cams, max) {
+  if (cams.length <= max) return cams;
+  const buckets = 12, per = Math.ceil(max / buckets), out = [];
+  for (let b = 0; b < buckets; b++) {
+    const lo = b / buckets, hi = (b + 1) / buckets;
+    const inB = cams.filter((c) => c.frac >= lo && (c.frac < hi || (b === buckets - 1 && c.frac <= 1)));
+    const take = b >= buckets / 2 ? per + 1 : per;
+    const step = Math.max(1, Math.floor(inB.length / take));
+    for (let i = 0; i < inB.length && out.filter((c) => c.frac >= lo && c.frac < hi).length < take; i += step) out.push(inB[i]);
+  }
+  return out.slice(0, max);
 }
 
 export default async function handler(req, res) {
@@ -196,7 +212,7 @@ export default async function handler(req, res) {
     routes: routes.map((r, i) => ({ ...r, coords: lines[i].map(([la, lo]) => [+la.toFixed(5), +lo.toFixed(5)]) })),
     chains: ca.chains.sort(byFrac), closures: ca.closures.sort(byFrac),
     passes: wa.passes.sort(byFrac), alerts: [...wa.alerts, ...bc.alerts].sort(byFrac),
-    cams: [...ca.cams, ...wa.cams, ...bc.cams].sort(byFrac).slice(0, 40),
+    cams: spread([...ca.cams, ...wa.cams, ...bc.cams].sort(byFrac), 36),
     times, errors, fetchedAt: new Date().toISOString(),
     ...(q.debug ? { box: bx } : {}),
   });

@@ -78,7 +78,7 @@ function loadCached() {
 
 async function refresh(force = false) {
   if (!force && state.data && Date.now() - state.fetchedAt < FRESH_MS) return;
-  refreshBtn.classList.add('spin');
+  refreshBtn?.classList.add('spin');
   try {
     stage('requesting forecast');
     const data = await loadAll(RESORTS);
@@ -90,7 +90,7 @@ async function refresh(force = false) {
     stage('failed');
     state.error = e.message || String(e);
   } finally {
-    refreshBtn.classList.remove('spin');
+    refreshBtn?.classList.remove('spin');
     safeRender();
   }
 }
@@ -2984,7 +2984,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 // ---------- boot ----------
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 window.addEventListener('hashchange', () => { window.scrollTo(0, 0); safeRender(); });
-refreshBtn.addEventListener('click', () => hardRefresh());
+refreshBtn?.addEventListener('click', () => hardRefresh());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
 loadCached();
 safeRender();

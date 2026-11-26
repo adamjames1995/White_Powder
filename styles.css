@@ -1029,3 +1029,47 @@ html[data-theme="light"] .av-tabs button.on, html[data-theme="light"] .av-chips 
 .av3d-s:not(.face) svg { filter: brightness(.6) saturate(.9); }
 .av3d-side { position: absolute; left: 50%; transform-style: preserve-3d; }
 .av3d-side svg { width: 100%; height: 100%; display: block; }
+/* WebGL rider viewer */
+.av3d { background: linear-gradient(#4f9fe0 0%, #a9d8ff 60%, #e9f5ff 100%); }
+.av3d-gl { position: absolute; inset: 0; }
+.av3d-gl canvas { display: block; width: 100%; height: 100%; touch-action: pan-y; }
+.av3d-flat { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 18px; pointer-events: none; }
+.av3d-flat:empty { display: none; }
+/* clearer glass: more of the page shows through the floating tabs */
+.tabbar { background: rgba(28, 28, 30, .2); backdrop-filter: blur(9px) saturate(170%); -webkit-backdrop-filter: blur(9px) saturate(170%);
+  box-shadow: 0 6px 22px rgba(0,0,0,.22), inset 0 0 0 .5px rgba(255,255,255,.28), inset 0 1px 0 rgba(255,255,255,.22); }
+.tabbar a { text-shadow: 0 1px 3px rgba(0,0,0,.55); }
+.tabbar a.on { background: rgba(255,255,255,.16); }
+html[data-theme="light"] .tabbar { background: rgba(255,255,255,.26); box-shadow: 0 6px 22px rgba(15,20,30,.14), inset 0 0 0 .5px rgba(0,0,0,.1), inset 0 1px 0 rgba(255,255,255,.7); }
+html[data-theme="light"] .tabbar a { text-shadow: 0 1px 2px rgba(255,255,255,.8); }
+html[data-theme="light"] .tabbar a.on { background: rgba(255,255,255,.5); }
+.cam-frame .cam-poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cam-frame iframe { z-index: 1; background: transparent; }
+.cam-stall { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 2; padding: 6px 10px; border-radius: 10px; font-size: 12px; color: #fff; background: rgba(0,0,0,.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+/* ---------- holiday flavor ---------- */
+.hol-banner { position: relative; display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; padding: 10px 12px; border-radius: 16px; color: #fff; overflow: hidden;
+  background: linear-gradient(110deg, var(--h1, #ff8c00), var(--h2, #7b2ff7)); box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+.hol-banner::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.22) 50%, transparent 70%); background-size: 250% 100%; animation: holsheen 5s ease-in-out infinite; pointer-events: none; }
+@keyframes holsheen { 0% { background-position: 120% 0; } 60%, 100% { background-position: -120% 0; } }
+.hol-emoji { font-size: 30px; animation: holwiggle 2.4s ease-in-out infinite; }
+@keyframes holwiggle { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg) scale(1.08); } }
+.hol-txt { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.25; }
+.hol-txt b { font-family: 'WP Brand', -apple-system, sans-serif; font-style: italic; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; font-size: 15px; }
+.hol-txt span { font-size: 12.5px; opacity: .92; }
+.hol-cta { position: relative; z-index: 1; border: 0; border-radius: 999px; padding: 7px 12px; font-weight: 700; font-size: 13px; background: rgba(255,255,255,.92); color: #222; white-space: nowrap; }
+.hol-x { position: relative; z-index: 1; border: 0; background: none; color: rgba(255,255,255,.8); font-size: 14px; padding: 4px; }
+.hol-thanksgiving { --h1: #b45309; --h2: #9a3412; } .hol-christmas { --h1: #b91c1c; --h2: #15803d; } .hol-newyear { --h1: #1e1b4b; --h2: #a16207; }
+.hol-valentine { --h1: #e11d48; --h2: #f472b6; } .hol-stpat { --h1: #15803d; --h2: #65a30d; } .hol-easter { --h1: #a78bfa; --h2: #f9a8d4; } .hol-halloween { --h1: #ea580c; --h2: #3b0764; }
+.hol-july4 { --h1: #1d4ed8; --h2: #b91c1c; } .hol-groundhog { --h1: #92400e; --h2: #0369a1; } .hol-mardigras { --h1: #6d28d9; --h2: #15803d; } .hol-aprilfools { --h1: #db2777; --h2: #0891b2; } .hol-birthday { --h1: #ec4899; --h2: #8b5cf6; }
+/* festive trim under the header */
+html[data-holiday]:not([data-holiday=""]) .topbar::after { content: ''; position: absolute; left: 0; right: 0; bottom: -4px; height: 4px; pointer-events: none;
+  background: repeating-linear-gradient(90deg, var(--t1) 0 14px, var(--t2) 14px 28px, var(--t3) 28px 42px); animation: holtrim 6s linear infinite; opacity: .9; }
+@keyframes holtrim { to { background-position: 84px 0; } }
+html[data-holiday="thanksgiving"] { --t1: #b45309; --t2: #f59e0b; --t3: #9a3412; } html[data-holiday="christmas"] { --t1: #dc2626; --t2: #f8fafc; --t3: #16a34a; }
+html[data-holiday="newyear"] { --t1: #facc15; --t2: #1e1b4b; --t3: #e5e7eb; } html[data-holiday="valentine"] { --t1: #e11d48; --t2: #fbcfe8; --t3: #f472b6; }
+html[data-holiday="stpat"] { --t1: #15803d; --t2: #facc15; --t3: #4ade80; } html[data-holiday="easter"] { --t1: #c4b5fd; --t2: #fde68a; --t3: #f9a8d4; }
+html[data-holiday="halloween"] { --t1: #ea580c; --t2: #111; --t3: #7c3aed; } html[data-holiday="july4"] { --t1: #b91c1c; --t2: #f8fafc; --t3: #1d4ed8; }
+html[data-holiday="groundhog"], html[data-holiday="mardigras"], html[data-holiday="aprilfools"], html[data-holiday="birthday"] { --t1: #ec4899; --t2: #facc15; --t3: #8b5cf6; }
+.hol-fx { position: fixed; inset: 0; pointer-events: none; z-index: 30; overflow: hidden; }
+.hol-fx i { position: absolute; top: -40px; font-style: normal; opacity: .9; animation: holfall linear 1 forwards; }
+@keyframes holfall { 0% { transform: translate(0, 0) rotate(0); opacity: 0; } 10% { opacity: .95; } 100% { transform: translate(40px, 105vh) rotate(360deg); opacity: .8; } }

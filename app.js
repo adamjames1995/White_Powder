@@ -1,6 +1,6 @@
 import { loadSkiArea, dist } from '/lib/skiarea.js';
 import { DayTracker } from '/lib/track.js';
-import { AV, ACC, HOLIDAY_ACC, holidaysOn, accLabel, DEFAULT_AV, randomAvatar, encodeAv, decodeAv, normAv, avatarSvg, avatar3d, avTitle, avMove, avGnar, avRide } from '/lib/avatar.js';
+import { AV, ACC, HOLIDAY_ACC, holidaysOn, accLabel, DEFAULT_AV, randomAvatar, encodeAv, decodeAv, normAv, palette3d, avatarSvg, avTitle, avMove, avGnar, avRide } from '/lib/avatar.js';
 import { plan, feedFor, LEVELS as AI_LEVELS, SNOW } from '/lib/plan.js';
 import { stayAdvice, hotelLinks, GOALS, VEHICLE_DEFAULT, chainLevel, chainAdvice, passAdvice, pickLeave, powderPick, packList, sampleRoute, googleMapsUrl, appleMapsUrl, fmtDur } from '/lib/drive.js';
 import { CATALOG, logoUrl, openingFor, passOf, PASSES, slug, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
@@ -499,7 +499,7 @@ function renderHome() {
     : !RESORTS.length ? `<div class="card pad"><p>No mountains yet.</p><a class="btn primary" href="#/manage">Add mountains</a></div>` : '';
   const lvl = getLevel();
   const sortKey = getSort(), home = getHome(), needsHome = sortKey === 'drive' || sortKey === 'best';
-  const html = `
+  const html = `${holidayBanner()}
     <div class="homebar">
       <div class="seg-ctl views" role="tablist">
         <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favs</button>
@@ -535,6 +535,8 @@ function renderHome() {
   }
   const bind = (sel, ev, fn) => app.querySelectorAll(sel).forEach((el) => { if (el.dataset.b) return; el.dataset.b = '1'; el.addEventListener(ev, fn); });
   bind('#replay-tut', 'click', (e) => { e.preventDefault(); showTutorial(); });
+  bind('#hol-go', 'click', () => openAvatarBuilder(null, 'acc'));
+  bind('#hol-x', 'click', (e) => { e.stopPropagation(); try { localStorage.setItem(holKey(), '1'); } catch {} e.currentTarget.closest('.hol-banner')?.remove(); });
 
   bind('[data-view]', 'click', (e) => {
     const v = e.currentTarget.dataset.view; if (v === (localStorage.getItem(VIEW_KEY) || 'fav')) return;
@@ -995,18 +997,39 @@ async function loadCams(r) {
       <span>${esc(c.name)}</span>
     </button>`;
   const official = `<a class="cam official" href="${esc(camsLink(r))}" target="_blank" rel="noopener"><div class="ph">📷</div><span>${r.camsUrl ? `All ${esc(r.name)} cams` : `Search ${esc(r.name)} webcams`} ↗</span></a>`;
-  let first = all.findIndex((c) => c.embed);
+  // the mountain's own cams first (live player, else its snapshot), then nearby cams
+  let first = all.findIndex((c) => c.src === 'resort' && c.embed);
+  if (first < 0) first = all.findIndex((c) => c.src === 'resort' && c.preview);
+  if (first < 0) first = all.findIndex((c) => c.embed);
   if (first < 0) first = all.findIndex((c) => c.preview);
   const auto = camAutoplay() && first >= 0;
   const snap = (u) => `${u}${u.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  // Live players sit on top of the cam's snapshot, so there's always a picture; if a player hasn't loaded in 8 s
+  // we drop back to the snapshot (auto-refreshing) and offer the next cam.
   const feature = (c) => (c.embed
-    ? `<iframe id="cam-live" src="${esc(c.embed)}" title="${esc(c.name)} webcam" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`
+    ? `${c.preview ? `<img class="cam-poster" src="${esc(snap(c.preview))}" alt=""/>` : ''}<iframe id="cam-live" src="${esc(c.embed)}" title="${esc(c.name)} webcam" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen onload="this.dataset.ok='1'"></iframe>`
     : `<img id="cam-live" class="cam-snap" data-src="${esc(c.preview)}" src="${esc(snap(c.preview))}" alt="${esc(c.name)}"/>`);
+  let cur = 0;
+  const playable = all.map((c, i) => (c.embed || c.preview ? i : -1)).filter((i) => i >= 0);
+  const show = (i) => {
+    const c = all[i], frame = document.getElementById('cam-frame'); if (!c || !frame) return;
+    cur = i; frame.innerHTML = feature(c);
+    const cap = document.getElementById('cam-cap');
+    if (cap) cap.innerHTML = `${esc(c.name)}${c.road ? ' · road cam' : ''} · <a href="${esc(c.link || c.embed || c.preview)}" target="_blank" rel="noopener">open ↗</a>${playable.length > 1 ? ' · <button class="linkbtn" id="cam-next">next cam ›</button>' : ''}`;
+    document.getElementById('cam-next')?.addEventListener('click', () => show(playable[(playable.indexOf(cur) + 1) % playable.length]));
+    const ifr = frame.querySelector('iframe');
+    if (ifr) setTimeout(() => {
+      if (!ifr.isConnected || ifr.dataset.ok) return;
+      if (c.preview) { frame.innerHTML = feature({ ...c, embed: null }); }
+      frame.insertAdjacentHTML('beforeend', `<div class="cam-stall">Live feed isn't loading${c.preview ? ' — showing the latest snapshot' : ''}.</div>`);
+    }, 8000);
+  };
   el().innerHTML = `
-    ${auto ? `<div class="cam-feature"><div class="cam-frame" id="cam-frame">${feature(all[first])}</div><div class="small muted cam-cap" id="cam-cap">${esc(all[first].name)}</div></div>` : ''}
+    ${auto ? `<div class="cam-feature"><div class="cam-frame" id="cam-frame"></div><div class="small muted cam-cap" id="cam-cap"></div></div>` : ''}
     <div class="camrow-in">${all.map(tile).join('')}${official}</div>
     ${!all.length ? '<p class="small muted">No cams found for this mountain yet — try the link above.</p>' : ''}
     ${cams.list.length ? `<p class="small muted" style="margin:6px 0 0">Nearby cams via ${[...new Set(cams.list.map((c) => c.src || 'Windy'))].map((x) => (x === 'Windy' ? '<a href="https://www.windy.com/webcams" target="_blank" rel="noopener">windy.com</a>' : x)).join(', ')}</p>` : ''}`;
+  if (auto) show(first);
   clearInterval(loadCams.tick);
   loadCams.tick = setInterval(() => {
     const im = document.querySelector('img.cam-snap');
@@ -1016,8 +1039,7 @@ async function loadCams(r) {
   el().querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', () => {
     const c = all[Number(b.dataset.i)];
     if (!c.embed && c.preview && document.getElementById('cam-frame')) {
-      document.getElementById('cam-frame').innerHTML = feature(c); document.getElementById('cam-cap').textContent = c.name;
-      document.getElementById('cam-frame').scrollIntoView({ block: 'center', behavior: 'smooth' }); return;
+      show(Number(b.dataset.i)); document.getElementById('cam-frame').scrollIntoView({ block: 'center', behavior: 'smooth' }); return;
     }
     if (!c.embed && c.preview) { // snapshot cams (highway / Windy without a player): enlarge in the app
       const m = modal(`<div class="cam-h"><b>${esc(c.name)}</b><button class="circ sm" id="sc-x" aria-label="Close">✕</button></div>
@@ -1028,7 +1050,7 @@ async function loadCams(r) {
     }
     if (!c.embed) { window.open(c.link, '_blank', 'noopener'); return; }
     const frame = document.getElementById('cam-frame');
-    if (frame) { frame.innerHTML = feature(c); document.getElementById('cam-cap').textContent = c.name; frame.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    if (frame) { show(Number(b.dataset.i)); frame.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
     else openCam(c.name, c.embed, r);
   }));
 }
@@ -1853,6 +1875,32 @@ const TUTORIAL = [
   ['⚙️', 'Settings & powder alerts', 'Tap the gear to switch light/dark mode or get a notification when a big snow day is coming. On iPhone, add White Powder to your Home Screen first (Share → Add to Home Screen).'],
 ];
 
+// ---------- holiday flavor on the main page ----------
+const HOL_LINE = {
+  thanksgiving: 'Grateful for snow. Grab a turkey leg for your rider.', christmas: 'May your days be merry and your powder deep.', newyear: 'New year, new vertical. Party hat optional.',
+  valentine: 'Roses are red, groomers are blue…', stpat: 'Luck of the Irish: may it dump this weekend.', easter: 'Hunting for eggs (and stashes of powder).', halloween: 'Spooky season. The scariest thing is a closed lift.',
+  july4: 'Summer turns, stars & stripes.', groundhog: 'Shadow or not, we want six more weeks of winter.', mardigras: 'Laissez les bons temps rouler… down the hill.', aprilfools: 'Forecast: 300 inches tonight. (April Fools.)', birthday: 'Happy birthday! Birthday laps are mandatory.',
+};
+const HOL_FX = { thanksgiving: '🍂', christmas: '❄️', newyear: '🎉', valentine: '💘', stpat: '☘️', easter: '🥚', halloween: '🎃', july4: '🎆', groundhog: '🦫', mardigras: '🎭', aprilfools: '🤡', birthday: '🎈' };
+const holToday = () => { try { return holidaysOn(new Date(), aiMe().bday)[0] || null; } catch { return null; } };
+const holKey = () => { const h = holToday(); return h ? `wp:holbanner:${h.key}:${new Date().toDateString()}` : ''; };
+function holidayBanner() {
+  const h = holToday(); if (!h || localStorage.getItem(holKey())) return '';
+  const title = h.key === 'birthday' ? `Happy birthday${aiMe().name ? `, ${esc(aiMe().name)}` : ''}!` : `${esc(h.name.replace(/^Happy /, 'Happy '))}${/!$/.test(h.name) ? '' : '!'}`;
+  return `<div class="hol-banner hol-${h.key}"><span class="hol-emoji">${h.emoji}</span><div class="hol-txt"><b>${title}</b><span>${esc(HOL_LINE[h.key] || '')}</span></div>
+    <button class="hol-cta" id="hol-go">Props ›</button><button class="hol-x" id="hol-x" aria-label="Hide for today">✕</button></div>`;
+}
+function holidayDecor() {
+  const h = holToday();
+  document.documentElement.dataset.holiday = h ? h.key : '';
+  if (!h || sessionStorage.getItem('wp:holfx') === h.key) return;
+  try { sessionStorage.setItem('wp:holfx', h.key); } catch {}
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const box = document.createElement('div'); box.className = 'hol-fx'; box.setAttribute('aria-hidden', 'true');
+  box.innerHTML = Array.from({ length: 26 }, (_, i) => `<i style="left:${(i * 37) % 100}%;animation-delay:${((i * 0.29) % 3).toFixed(2)}s;animation-duration:${(4 + (i % 5) * 0.7).toFixed(1)}s;font-size:${14 + (i % 4) * 5}px">${HOL_FX[h.key] || h.emoji}</i>`).join('');
+  document.body.appendChild(box); setTimeout(() => box.remove(), 9500);
+}
+
 function holidayPromo() {
   if (!localStorage.getItem(ONBOARD_KEY)) return; // first run has its own rider prompt
   const h = holidaysOn(new Date(), aiMe().bday)[0]; if (!h) return;
@@ -2458,27 +2506,30 @@ function riderCard(a, name, big) {
     <div class="rider-txt"><b>${esc(name || 'Mystery rider')}</b><span class="rider-title">${esc(avTitle(a))}</span>
     <span class="small muted">Signature move: <b>${esc(avMove(a))}</b></span><span class="small muted">Gnar level: ${esc(avGnar(a))}</span></div></div>`;
 }
-// 3D viewer: layered rig with perspective; drag to spin; idle animation depends on skier vs snowboarder; tap Trick for a stunt.
-function mountViewer(host, a) {
-  host.innerHTML = `<div class="av3d" tabindex="0" aria-label="3D rider preview — drag to spin">
-      <div class="av3d-snow">${'<i></i>'.repeat(18)}</div><div class="av3d-slope"></div>
-      <div class="av3d-cam"><div class="av3d-spin">${avatar3d(a)}</div></div>
-      <button class="av3d-trick" type="button">${normAv(a).ride === 1 ? '🏂 Trick' : '⛷️ Trick'}</button>
-      <span class="av3d-hint">drag to spin</span></div>`;
-  const box = host.querySelector('.av3d'), spin = host.querySelector('.av3d-spin');
-  let ry = host._ry ?? -18, dragging = false, x0 = 0, r0 = 0, vel = 0, last = 0, raf = 0;
-  const set = () => { spin.style.transform = `rotateY(${ry}deg)`; };
-  const coast = () => { if (dragging) return; vel *= 0.94; ry += vel; host._ry = ry; set(); if (Math.abs(vel) > 0.05) raf = requestAnimationFrame(coast); };
-  box.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) return; dragging = true; x0 = e.clientX; r0 = ry; last = e.clientX; vel = 0; cancelAnimationFrame(raf); box.setPointerCapture(e.pointerId); box.classList.add('drag'); });
-  box.addEventListener('pointermove', (e) => { if (!dragging) return; ry = r0 + (e.clientX - x0) * 0.7; vel = (e.clientX - last) * 0.7; last = e.clientX; host._ry = ry; set(); });
-  const up = () => { if (!dragging) return; dragging = false; box.classList.remove('drag'); raf = requestAnimationFrame(coast); };
-  box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
-  host.querySelector('.av3d-trick').addEventListener('click', () => {
-    const rig = host.querySelector('.av3d-rig'); rig.classList.remove('trick'); void rig.offsetWidth; rig.classList.add('trick');
-    setTimeout(() => rig.classList.remove('trick'), 1500);
-  });
-  set();
+// 3D viewer: a real-time WebGL model (three.js, lazy-loaded) — one context per builder, rebuilt in place on every change.
+// Falls back to the flat drawing if WebGL isn't available.
+let rider3dMod = null;
+async function mountViewer(host, a) {
+  const { o, P } = palette3d(a);
+  if (!host.querySelector('.av3d')) {
+    host.innerHTML = `<div class="av3d" aria-label="3D rider preview — drag to spin"><div class="av3d-gl"></div>
+      <button class="av3d-trick" type="button"></button><span class="av3d-hint">drag to spin</span><div class="av3d-flat"></div></div>`;
+    host.querySelector('.av3d-trick').addEventListener('click', () => host._viewer?.trick());
+  }
+  host.querySelector('.av3d-trick').textContent = o.ride === 1 ? '🏂 Trick' : '⛷️ Trick';
+  const flat = host.querySelector('.av3d-flat');
+  if (host._viewer) { host._viewer.update(o, P); return; }
+  flat.innerHTML = avatarSvg(o, { size: 150 }); // shows instantly while the 3D engine loads
+  try {
+    rider3dMod ||= await import('/vendor/rider3d.js');
+    if (!host.isConnected) return;
+    if (!host._viewer) host._viewer = rider3dMod.createRiderViewer(host.querySelector('.av3d-gl'));
+    host._viewer.update(...Object.values(palette3d(host._av || a)));
+    flat.innerHTML = '';
+  } catch (e) { console.warn('3D viewer unavailable', e); host.querySelector('.av3d-hint').textContent = ''; }
+  host._av = a;
 }
+
 function openAvatarBuilder(onDone, startTab = 'ride') {
   let a = normAv(myAv() || randomAvatar());
   const me = aiMe();
@@ -2523,7 +2574,7 @@ function openAvatarBuilder(onDone, startTab = 'ride') {
   let pendingName = aiMe().name || '';
   const refresh = (rebuildPanel) => {
     a = normAv(a);
-    mountViewer(m.querySelector('#av-view'), a);
+    const vh = m.querySelector('#av-view'); vh._av = a; mountViewer(vh, a);
     m.querySelector('#av-n').textContent = pendingName || 'Mystery rider';
     m.querySelector('#av-t').textContent = a.title;
     m.querySelector('#av-mv').textContent = `Signature move: ${a.move}`;
@@ -2557,13 +2608,14 @@ function openAvatarBuilder(onDone, startTab = 'ride') {
   m.querySelector('#av-dice').addEventListener('click', () => {
     const keep = { title: a.title, move: a.move }; a = { ...randomAvatar() };
     if (tab === 'me') Object.assign(a, keep); // don't wipe text you're typing
-    refresh(true); m.querySelector('.av3d-trick')?.click();
+    refresh(true); setTimeout(() => m.querySelector('#av-view')._viewer?.trick(), 50);
   });
-  m.querySelector('#av-x').onclick = () => m.remove();
+  const close = () => { m.querySelector('#av-view')._viewer?.destroy(); m.remove(); };
+  m.querySelector('#av-x').onclick = close;
   m.querySelector('#av-save').addEventListener('click', () => {
     a = normAv(a);
     setAiMe({ av: encodeAv(a), name: pendingName || aiMe().name });
-    m.remove(); if (AI.tracker) syncSquad(); onDone?.();
+    close(); if (AI.tracker) syncSquad(); onDone?.();
   });
   refresh(true);
 }
@@ -3245,3 +3297,4 @@ safeRender();
 refresh();
 setTimeout(() => (localStorage.getItem(ONBOARD_KEY) ? maybeShowDonate() : maybeShowDonate(() => startOnboarding())), 700);
 setTimeout(() => { if (!document.querySelector('.modal')) holidayPromo(); }, 2600);
+holidayDecor();

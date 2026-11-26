@@ -1081,3 +1081,10 @@ html[data-holiday="groundhog"], html[data-holiday="mardigras"], html[data-holida
 .logo-hol.d3 { right: -12px; bottom: -6px; font-size: 13px; --r: -6deg; animation-delay: -2s; }
 @keyframes logosway { 0%, 100% { transform: rotate(var(--r)) translateY(0); } 50% { transform: rotate(calc(var(--r) * -0.4)) translateY(-1.5px); } }
 @media (prefers-reduced-motion: reduce) { .logo-hol { animation: none; transform: rotate(var(--r)); } }
+/* richer falling: drift + sway on the outer, 3D tumble on the inner */
+.hol-fx i { display: block; animation-name: holfall2; animation-timing-function: linear; }
+.hol-fx i b { display: block; font-weight: normal; animation: holtumble ease-in-out infinite alternate; transform-origin: 50% 40%; }
+@keyframes holfall2 { 0% { transform: translate(0, 0); opacity: 0; } 8% { opacity: .95; } 30% { transform: translate(calc(var(--dx) * .3 + var(--sw)), 30vh); }
+  60% { transform: translate(calc(var(--dx) * .6 - var(--sw)), 62vh); } 90% { opacity: .9; } 100% { transform: translate(var(--dx), 108vh); opacity: .7; } }
+@keyframes holtumble { 0% { transform: rotateX(0) rotateY(0) rotateZ(-25deg); } 50% { transform: rotateX(55deg) rotateY(25deg) rotateZ(15deg); } 100% { transform: rotateX(-30deg) rotateY(160deg) rotateZ(45deg); } }
+.hol-fx i b svg { display: block; filter: drop-shadow(0 2px 2px rgba(0,0,0,.25)); }

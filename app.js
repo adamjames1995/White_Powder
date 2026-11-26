@@ -1882,6 +1882,18 @@ const HOL_LINE = {
   july4: 'Summer turns, stars & stripes.', groundhog: 'Shadow or not, we want six more weeks of winter.', mardigras: 'Laissez les bons temps rouler… down the hill.', aprilfools: 'Forecast: 300 inches tonight. (April Fools.)', birthday: 'Happy birthday! Birthday laps are mandatory.',
 };
 const HOL_FX = { thanksgiving: '🍂', christmas: '❄️', newyear: '🎉', valentine: '💘', stpat: '☘️', easter: '🥚', halloween: '🎃', july4: '🎆', groundhog: '🦫', mardigras: '🎭', aprilfools: '🤡', birthday: '🎈' };
+// Falling things per holiday — a mix of shapes, colors and sizes so it never looks like one repeated sprite.
+const leaf = (d, c1, c2) => `<svg viewBox="0 0 40 40" width="100%" height="100%"><defs><linearGradient id="g${c1.slice(1)}${c2.slice(1)}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs><path d="${d}" fill="url(#g${c1.slice(1)}${c2.slice(1)})"/><path d="M20 36 L20 10" stroke="rgba(60,20,0,.45)" stroke-width="1.2" fill="none"/></svg>`;
+const MAPLE = 'M20 2 L23 11 L30 7 L28 15 L37 15 L31 21 L35 27 L25 25 L22 34 L20 38 L18 34 L15 25 L5 27 L9 21 L3 15 L12 15 L10 7 L17 11 Z';
+const OAK = 'M20 3 C24 6 27 6 26 10 C30 10 31 14 28 16 C32 18 32 22 28 23 C31 26 29 30 25 29 C25 33 22 35 20 37 C18 35 15 33 15 29 C11 30 9 26 12 23 C8 22 8 18 12 16 C9 14 10 10 14 10 C13 6 16 6 20 3 Z';
+const BIRCH = 'M20 2 C30 10 32 22 20 37 C8 22 10 10 20 2 Z';
+const ASPEN = 'M20 4 C31 8 33 20 26 29 C23 33 21 35 20 37 C19 35 17 33 14 29 C7 20 9 8 20 4 Z';
+const HOL_FALL = {
+  thanksgiving: ['🍂', '🍁', leaf(MAPLE, '#ef4444', '#b91c1c'), leaf(OAK, '#d97706', '#92400e'), leaf(BIRCH, '#facc15', '#ca8a04'), leaf(MAPLE, '#f97316', '#c2410c'), leaf(ASPEN, '#eab308', '#a16207'), leaf(OAK, '#b45309', '#78350f'), '🍃', leaf(MAPLE, '#dc2626', '#f59e0b'), '🌰'],
+  christmas: ['❄️', '❅', '❆', '🎄', '⭐', '🎁', '🔔', '❄️'], newyear: ['🎉', '🎊', '✨', '🥳', '⭐', '🎆'], valentine: ['💘', '💖', '💕', '🌹', '💗'],
+  stpat: ['☘️', '🍀', '🌈', '🪙', '☘️'], easter: ['🥚', '🐣', '🌷', '🐰', '🌼'], halloween: ['🎃', '🦇', '👻', '🍬', '🕸️', '🍂'], july4: ['🎆', '🎇', '⭐', '✨', '🇺🇸'],
+  groundhog: ['🦫', '❄️', '☀️'], mardigras: ['🎭', '⚜️', '🟣', '🟢', '🟡'], aprilfools: ['🤡', '🙃', '🎈', '🃏'], birthday: ['🎈', '🎉', '🎂', '🎁', '🎊'],
+};
 const holToday = () => { try { return holidaysOn(new Date(), aiMe().bday)[0] || null; } catch { return null; } };
 const holKey = () => { const h = holToday(); return h ? `wp:holbanner:${h.key}:${new Date().toDateString()}` : ''; };
 // Little decorations tucked around the White Powder logo: [on the mark, after the wordmark, by the tagline]
@@ -1907,13 +1919,18 @@ function holidayBanner() {
 function holidayDecor() {
   const h = holToday();
   document.documentElement.dataset.holiday = h ? h.key : '';
-  logoDecor();
   if (!h || sessionStorage.getItem('wp:holfx') === h.key) return;
   try { sessionStorage.setItem('wp:holfx', h.key); } catch {}
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const box = document.createElement('div'); box.className = 'hol-fx'; box.setAttribute('aria-hidden', 'true');
-  box.innerHTML = Array.from({ length: 26 }, (_, i) => `<i style="left:${(i * 37) % 100}%;animation-delay:${((i * 0.29) % 3).toFixed(2)}s;animation-duration:${(4 + (i % 5) * 0.7).toFixed(1)}s;font-size:${14 + (i % 4) * 5}px">${HOL_FX[h.key] || h.emoji}</i>`).join('');
-  document.body.appendChild(box); setTimeout(() => box.remove(), 9500);
+  const pool = HOL_FALL[h.key] || [h.emoji];
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  box.innerHTML = Array.from({ length: 30 }, (_, i) => {
+    const item = pool[i % pool.length], sz = rnd(16, 34);
+    return `<i style="left:${rnd(-4, 100).toFixed(1)}%;animation-delay:${rnd(0, 3.2).toFixed(2)}s;animation-duration:${rnd(4.2, 7.5).toFixed(1)}s;--dx:${rnd(-60, 80).toFixed(0)}px;--sw:${rnd(18, 46).toFixed(0)}px;--spin:${rnd(220, 720).toFixed(0)}deg;font-size:${sz.toFixed(0)}px;width:${sz.toFixed(0)}px">
+      <b style="animation-duration:${rnd(1.1, 2.4).toFixed(1)}s;animation-delay:-${rnd(0, 2).toFixed(1)}s">${item}</b></i>`;
+  }).join('');
+  document.body.appendChild(box); setTimeout(() => box.remove(), 11500);
 }
 
 function holidayPromo() {

@@ -937,3 +937,73 @@ html[data-theme="light"] .av-chips button { border-color: rgba(0,0,0,.14); backg
 html[data-theme="light"] .av-chips button.on { background: #111; color: #fff; }
 html[data-theme="light"] .av-sw button { border-color: rgba(0,0,0,.15); }
 html[data-theme="light"] .av-sw button.on { border-color: #111; }
+/* ---------- rider builder v2: tabs + 3D viewer ---------- */
+.av-tabs { display: flex; gap: 4px; margin: 6px 0 4px; position: sticky; top: -1px; z-index: 2; background: var(--card, #1b1b1a); padding: 6px 0; }
+.av-tabs button { flex: 1; padding: 8px 4px; border-radius: 10px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.04); color: inherit; font-size: 13px; font-weight: 600; }
+.av-tabs button.on { background: #fff; color: #111; }
+.av-tabs #av-dice { flex: 0 0 44px; font-size: 18px; }
+.av-chips.wrap { flex-wrap: wrap; overflow: visible; }
+.av-chips button.on { background: #fff; color: #111; border-color: #fff; font-weight: 600; }
+.av-id { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; margin-top: 4px; }
+.av-id b { font-size: 18px; }
+.av-sec input:not([type]) , .av-sec input[maxlength] { width: 100%; margin-bottom: 8px; }
+.rider-ask { text-align: center; }
+.rider-ask .av { display: block; margin: 0 auto 4px; }
+html[data-theme="light"] .av-tabs { background: var(--card, #fff); }
+html[data-theme="light"] .av-tabs button.on, html[data-theme="light"] .av-chips button.on { background: #111; color: #fff; border-color: #111; }
+
+.av3d { position: relative; height: 250px; border-radius: 18px; overflow: hidden; touch-action: pan-y; cursor: grab; user-select: none;
+  background: linear-gradient(#5aa9e6 0%, #9fd3ff 55%, #eaf6ff 56%, #ffffff 100%); }
+.av3d.drag { cursor: grabbing; }
+.av3d-slope { position: absolute; left: -10%; right: -10%; bottom: 0; height: 46%; background: linear-gradient(170deg, #ffffff, #dbeaf7); transform: skewY(-6deg); transform-origin: left; }
+.av3d-snow i { position: absolute; top: -6px; width: 4px; height: 4px; border-radius: 50%; background: #fff; opacity: .9; animation: av3dsnow linear infinite; }
+.av3d-snow i:nth-child(3n) { width: 3px; height: 3px; }
+
+.av3d-cam { position: absolute; inset: 0; perspective: 700px; perspective-origin: 50% 30%; }
+.av3d-spin { position: absolute; left: 50%; bottom: 22px; width: 150px; height: 190px; margin-left: -75px; transform-style: preserve-3d; transition: transform .05s linear; }
+.av3d-rig { position: absolute; inset: 0; transform-style: preserve-3d; transform-origin: 50% 92%; }
+.av3d-l { position: absolute; left: 0; top: 0; width: 150px; height: 168px; transform-style: preserve-3d; }
+.av3d-l svg, .av3d-gear svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.av3d-l.back { transform: translateZ(-14px); }
+.av3d-l.legs { transform: translateZ(0); }
+.av3d-l.body { transform: translateZ(4px); }
+.av3d-l.head { transform: translateZ(9px); transform-origin: 50% 30%; }
+.av3d-l.arms { transform: translateZ(14px); }
+.av3d-gear { position: absolute; left: -12px; top: 117px; width: 174px; height: 70px; transform: rotateX(86deg) rotateZ(90deg) scale(.95); transform-origin: 50% 50%; }
+.av3d-rig.board .av3d-gear { transform: rotateX(86deg) rotateZ(0deg); }
+.av3d-shadow { position: absolute; left: 15px; right: 15px; top: 140px; height: 24px; border-radius: 50%; background: radial-gradient(rgba(0,40,80,.35), transparent 70%); transform: rotateX(86deg); }
+/* idle animations: skiers carve, snowboarders rock heel/toe with a little ollie */
+.av3d-rig.ski { animation: av3dcarve 2.4s ease-in-out infinite; }
+.av3d-rig.ski .av3d-l.arms { animation: av3dpole 1.2s ease-in-out infinite; transform-origin: 50% 40%; }
+.av3d-rig.board { animation: av3drock 2.8s ease-in-out infinite; }
+.av3d-rig.ski .av3d-l.head, .av3d-rig.board .av3d-l.head { animation: av3dnod 2.4s ease-in-out infinite; }
+.av3d-rig.trick.ski { animation: av3dhelicopter 1.4s cubic-bezier(.3,.1,.3,1) 1; }
+.av3d-rig.trick.board { animation: av3dflip 1.4s cubic-bezier(.3,.1,.3,1) 1; }
+.av3d-trick { position: absolute; right: 10px; top: 10px; z-index: 3; border: 0; border-radius: 999px; padding: 7px 12px; font-weight: 700; font-size: 13px; background: rgba(0,0,0,.55); color: #fff; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.av3d-hint { position: absolute; left: 12px; top: 13px; font-size: 11px; color: rgba(0,30,60,.55); font-weight: 600; }
+@keyframes av3dsnow { to { transform: translate(-30px, 270px); } }
+@keyframes av3dcarve { 0%,100% { transform: translateX(-16px) rotateZ(7deg) rotateY(-14deg); } 50% { transform: translateX(16px) rotateZ(-7deg) rotateY(14deg); } }
+@keyframes av3dpole { 0%,100% { transform: translateZ(14px) rotateZ(0); } 50% { transform: translateZ(14px) rotateZ(-3deg) translateY(2px); } }
+@keyframes av3drock { 0%,100% { transform: rotateX(8deg) rotateY(-24deg) translateY(0); } 40% { transform: rotateX(-8deg) rotateY(24deg) translateY(0); } 70% { transform: rotateX(0) rotateY(10deg) translateY(-18px) rotateZ(-6deg); } 80% { transform: rotateY(6deg) translateY(0); } }
+@keyframes av3dnod { 0%,100% { transform: translateZ(9px) rotateZ(0); } 50% { transform: translateZ(9px) rotateZ(-3deg); } }
+@keyframes av3dhelicopter { 0% { transform: translateY(0) rotateY(0); } 15% { transform: translateY(6px) rotateY(0) scaleY(.94); } 55% { transform: translateY(-70px) rotateY(220deg); } 90% { transform: translateY(0) rotateY(360deg); } 95% { transform: translateY(4px) rotateY(360deg) scaleY(.94); } 100% { transform: translateY(0) rotateY(360deg); } }
+@keyframes av3dflip { 0% { transform: translateY(0) rotateX(0) rotateY(0); } 15% { transform: translateY(6px) scaleY(.94); } 50% { transform: translateY(-80px) rotateY(180deg) rotateZ(-20deg); } 85% { transform: translateY(0) rotateY(360deg) rotateZ(0); } 100% { transform: translateY(0) rotateY(360deg); } }
+@media (prefers-reduced-motion: reduce) { .av3d-rig, .av3d-l, .av3d-snow i, .av-bob { animation: none !important; } }
+.av3d-snow i:nth-child(1) { left: 0%; animation-duration: 3s; animation-delay: -0.0s; }
+.av3d-snow i:nth-child(2) { left: 53%; animation-duration: 5s; animation-delay: -1.3s; }
+.av3d-snow i:nth-child(3) { left: 6%; animation-duration: 7s; animation-delay: -2.6s; }
+.av3d-snow i:nth-child(4) { left: 59%; animation-duration: 4s; animation-delay: -3.9s; }
+.av3d-snow i:nth-child(5) { left: 12%; animation-duration: 6s; animation-delay: -1.2s; }
+.av3d-snow i:nth-child(6) { left: 65%; animation-duration: 3s; animation-delay: -2.5s; }
+.av3d-snow i:nth-child(7) { left: 18%; animation-duration: 5s; animation-delay: -3.8s; }
+.av3d-snow i:nth-child(8) { left: 71%; animation-duration: 7s; animation-delay: -1.1s; }
+.av3d-snow i:nth-child(9) { left: 24%; animation-duration: 4s; animation-delay: -2.4s; }
+.av3d-snow i:nth-child(10) { left: 77%; animation-duration: 6s; animation-delay: -3.7s; }
+.av3d-snow i:nth-child(11) { left: 30%; animation-duration: 3s; animation-delay: -1.0s; }
+.av3d-snow i:nth-child(12) { left: 83%; animation-duration: 5s; animation-delay: -2.3s; }
+.av3d-snow i:nth-child(13) { left: 36%; animation-duration: 7s; animation-delay: -3.6s; }
+.av3d-snow i:nth-child(14) { left: 89%; animation-duration: 4s; animation-delay: -0.9s; }
+.av3d-snow i:nth-child(15) { left: 42%; animation-duration: 6s; animation-delay: -2.2s; }
+.av3d-snow i:nth-child(16) { left: 95%; animation-duration: 3s; animation-delay: -3.5s; }
+.av3d-snow i:nth-child(17) { left: 48%; animation-duration: 5s; animation-delay: -0.8s; }
+.av3d-snow i:nth-child(18) { left: 1%; animation-duration: 7s; animation-delay: -2.1s; }

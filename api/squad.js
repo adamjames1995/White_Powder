@@ -37,7 +37,7 @@ export default async function handler(req, res) {
       const id = clean(m.id, 24);
       if (!id) return res.status(400).json({ error: 'no member id' });
       const rec = {
-        id, name: clean(m.name, 24) || 'Skier', at: Date.now(), av: /^[\d.]{1,40}$/.test(String(m.av || '')) ? String(m.av) : '',
+        id, name: clean(m.name, 24) || 'Skier', at: Date.now(), av: clean(m.av, 220).replace(/[\\"]/g, ''),
         lat: Number.isFinite(m.lat) ? +m.lat.toFixed(5) : null, lon: Number.isFinite(m.lon) ? +m.lon.toFixed(5) : null,
         state: clean(m.state, 12), lift: clean(m.lift, 40), plan: clean(m.plan, 140), runs: Number(m.runs) || 0, vertFt: Number(m.vertFt) || 0,
       };

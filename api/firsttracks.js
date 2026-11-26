@@ -53,10 +53,10 @@ async function tomtomTimes(from, to, departs, key) {
 function highways(list) {
   const out = [];
   for (const raw of list) {
-    const x = String(raw || '').trim().replace(/^(SR|CA|WA)[ -]?/i, 'Hwy ').replace(/^US[ -]?/i, 'US-').replace(/^I[ -]?/i, 'I-');
-    if (x && /\d/.test(x) && !out.includes(x)) out.push(x);
+    const x = String(raw || '').trim().replace(/\s+[NSEW]$/i, '').replace(/^(SR|CA|WA|BC)[ -]?/i, 'Hwy ').replace(/^US[ -]?/i, 'US-').replace(/^I[ -]?/i, 'I-');
+    if (x && /\d/.test(x) && !/county|^cr\b/i.test(x) && !out.includes(x)) out.push(x);
   }
-  return out.slice(0, 8);
+  return out.slice(0, 16);
 }
 
 // ---------- geometry helpers ----------

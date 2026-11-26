@@ -1,7 +1,7 @@
 import { loadSkiArea, dist } from '/lib/skiarea.js';
 import { DayTracker } from '/lib/track.js';
 import { plan, feedFor, LEVELS as AI_LEVELS, SNOW } from '/lib/plan.js';
-import { GOALS, VEHICLE_DEFAULT, chainLevel, chainAdvice, passAdvice, pickLeave, powderPick, packList, sampleRoute, googleMapsUrl, appleMapsUrl, fmtDur } from '/lib/drive.js';
+import { stayAdvice, hotelLinks, GOALS, VEHICLE_DEFAULT, chainLevel, chainAdvice, passAdvice, pickLeave, powderPick, packList, sampleRoute, googleMapsUrl, appleMapsUrl, fmtDur } from '/lib/drive.js';
 import { CATALOG, logoUrl, openingFor, passOf, PASSES, slug, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS, midFt } from '/lib/snow.js';
 import { fetchDetail, compass } from '/lib/detail.js';
@@ -2324,6 +2324,8 @@ async function planDrive(dest, dayOffset, chair) {
   const plans = Object.fromEntries(Object.keys(GOALS).map((g) => [g, pickLeave({ goal: g, dayStart, firstChair: chair, baseMin: route.min, times, samples, chainLevelMax: chainMax, now: Date.now(), powderDay })]));
   const plan = plans[goal];
   const ri = Math.min(Number(ftPrefs().route) || 0, base.routes.length - 1);
+  const stay = dayOffset >= 0 ? stayAdvice({ plan: plans.chair, samples, chainMax, powderInches: pow.days.find((x) => x.day === dayStart)?.overnight || 0, dayStart, weekend: [0, 6].includes(new Date(dayStart).getDay()) }) : null;
+  const hl = hotelLinks(dest.name, dest.lat, dest.lon, dayStart);
   const inDay = (s) => s.hourly.t.map((t, i) => [t, i]).filter(([t]) => t >= plan.leave && t <= plan.arrive);
   const snowOnRoad = Math.max(0, ...samples.map((s) => inDay(s).reduce((a, [, i]) => a + (s.hourly.snow[i] || 0), 0)));
   const minTemp = Math.min(60, ...samples.flatMap((s) => inDay(s).map(([, i]) => s.hourly.temp[i])).filter(Number.isFinite));
@@ -2353,6 +2355,12 @@ async function planDrive(dest, dayOffset, chair) {
       ${!base.traffic ? '<p class="small muted">Traffic isn\'t included yet (needs the free TomTom key).</p>' : ''}
       ${pow.best ? `<div class="ft-pow">❄️ Powder pick: <b>${pow.best.day === dayStart ? 'this day' : new Date(pow.best.day).toLocaleDateString('en-US', { weekday: 'long' })}</b> — ${pow.best.overnight.toFixed(0)}" overnight at ${esc(dest.name)}${pow.best.road >= 1 ? `, ${pow.best.road.toFixed(0)}" on the road that morning` : ', roads mostly clear'}.</div>` : ''}
     </section>
+    ${stay ? `<section class="card pad ft-stay ${stay.strong ? 'strong' : ''}">
+      <h3 style="margin:0 0 4px">${stay.strong ? 'Stay the night before?' : 'Worth considering: stay over'}</h3>
+      <p class="small secondary" style="margin:0 0 8px">Because ${stay.why.map(esc).join(', ')}.</p>
+      ${stay.evening ? `<p class="small" style="margin:0 0 8px">Best time to drive up the evening before: <b>${new Date(stay.evening.dep).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</b>${stay.evening.snow < 0.1 ? ' — dry roads' : ` — lightest snow on the way (${stay.evening.snow.toFixed(1)}")`}.</p>` : ''}
+      <div class="ft-maps"><a class="btn sm" href="${esc(hl.google)}" target="_blank" rel="noopener">Hotels · Google</a><a class="btn sm" href="${esc(hl.apple)}" target="_blank" rel="noopener">Hotels · Apple</a><a class="btn sm" href="${esc(hl.airbnb)}" target="_blank" rel="noopener">Airbnb</a></div>
+    </section>` : ''}
     <section class="card pad">
       <h3 style="margin:0 0 6px">Chains & road conditions</h3>
       ${!live ? '<p class="small muted">Live chain controls apply to today; check again the night before.</p>' : ''}

@@ -857,3 +857,6 @@ html[data-theme="light"] .tabbar a.on { color: #111; background: rgba(255,255,25
 .ft-pin { width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
 .ft-pin.from { background: #111; } .ft-pin.to { background: #dc2626; }
 .btn.sm { padding: 7px 10px; font-size: 13px; }
+
+.ft-stay { border-left: 4px solid #f59e0b; }
+.ft-stay.strong { border-left-color: #ef4444; }

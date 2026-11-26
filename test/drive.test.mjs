@@ -49,3 +49,15 @@ test('goals give different leave times', () => {
   assert.ok(weather.weatherMin <= chair.weatherMin, 'weather goal avoids snow');
   assert.ok(traffic.trafficMin <= chair.trafficMin, 'traffic goal minimizes delay');
 });
+
+test('suggests staying over for a very early leave or a storm', async () => {
+  const { stayAdvice } = await import('../lib/drive.js');
+  const d0 = new Date(2026, 11, 19).setHours(0, 0, 0, 0);
+  const hours = Array.from({ length: 48 }, (_, i) => d0 - 24 * 3600e3 + i * 3600e3);
+  const samples = [{ frac: 0.8, elevFt: 7000, name: 'Pass', hourly: { t: hours, snow: hours.map((t) => (t >= d0 - 6 * 3600e3 ? 0.6 : 0)), temp: hours.map(() => 25) } }];
+  const plan = { leave: d0 + 3.5 * 3600e3, arrive: d0 + 7.5 * 3600e3, driveMin: 240, storm: { start: d0, end: d0 + 9 * 3600e3, peak: 0.8 } };
+  const s = stayAdvice({ plan, samples, chainMax: 2, powderInches: 12, dayStart: d0, weekend: true });
+  assert.ok(s && s.strong && s.why.length >= 3);
+  assert.ok(new Date(s.evening.dep).getHours() < 18, 'drive up before the evening snow');
+  assert.equal(stayAdvice({ plan: { leave: d0 + 6 * 3600e3, arrive: d0 + 8 * 3600e3, driveMin: 120, storm: null }, samples: [], dayStart: d0 }), null);
+});

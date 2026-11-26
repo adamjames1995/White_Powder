@@ -18,13 +18,15 @@ const inside = (lat, lon, [a, b, c, d]) => lat >= a && lat <= c && lon >= b && l
 
 async function windy(lat, lon, km, key) {
   const j = await get(`https://api.windy.com/webcams/api/v3/webcams?nearby=${lat},${lon},${km}&include=images,urls,player,location&limit=20`, 9000, { 'x-windy-api-key': key });
-  return (j.webcams || []).map((c) => ({
+  const fresh = (c) => (c.status == null || c.status === 'active') && (!c.lastUpdatedOn || Date.now() - Date.parse(c.lastUpdatedOn) < 36 * 3600e3);
+  return (j.webcams || []).filter(fresh).map((c) => ({
     id: `w${c.webcamId}`, title: c.title, src: 'Windy',
     image: c.images?.current?.preview || c.images?.daylight?.preview,
     link: c.urls?.detail || `https://www.windy.com/webcams/${c.webcamId}`,
     // Timelapse player (v3 returns strings or {available, embed}); fall back to Windy's public player URL so every cam plays in-app.
-    embed: (typeof c.player?.live === 'string' && c.player.live) || (c.player?.live?.available && c.player.live.embed) || (typeof c.player?.day === 'string' && c.player.day) || c.player?.day?.embed || `https://webcams.windy.com/webcams/public/embed/player/${c.webcamId}/day`,
-    live: !!(c.player?.live && (typeof c.player.live === 'string' || c.player.live.available)),
+    // Windy's own timelapse player only. Their "live" links wrap third-party streams (often dead YouTube videos), so we never use them.
+    embed: (typeof c.player?.day === 'string' && c.player.day) || (c.player?.day?.available !== false && c.player?.day?.embed) || `https://webcams.windy.com/webcams/public/embed/player/${c.webcamId}/day`,
+    live: false,
     km: c.location ? dist([lat, lon], [c.location.latitude, c.location.longitude]) / 1000 : null,
   })).filter((c) => c.image);
 }
@@ -58,6 +60,28 @@ async function drivebc(lat, lon, km) {
     return { id: `bc${c.id}`, title: c.name, src: 'DriveBC', image: rel.startsWith('http') ? rel : `https://www.drivebc.ca${rel}`, link: `https://www.drivebc.ca/images/${c.id}.jpg`, embed: null, live: false, km: dist([lat, lon], [la, lo]) / 1000, road: true };
   }).filter((c) => c.km <= km);
 }
+// A cam is only shown if its current image actually loads (HTTP 200, an image, not a tiny placeholder).
+async function imageOk(url) {
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { 'user-agent': UA, range: 'bytes=0-4095' } });
+    const ct = r.headers.get('content-type') || '', len = Number(r.headers.get('content-length') || r.headers.get('content-range')?.split('/')[1] || 99999);
+    try { r.body?.cancel?.(); } catch {}
+    return (r.ok || r.status === 206) && ct.startsWith('image') && len > 3000;
+  } catch { return false; } finally { clearTimeout(t); }
+}
+// Resort cam pages: reachable (2xx) and not an obvious "offline / not found" page.
+async function pageOk(url) {
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { 'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' } });
+    if (!r.ok) return false;
+    const ct = r.headers.get('content-type') || '';
+    if (ct.startsWith('image')) { try { r.body?.cancel?.(); } catch {} return true; }
+    const txt = (await r.text()).slice(0, 60000).toLowerCase();
+    return !/(camera (is )?offline|stream (is )?offline|video unavailable|not found<|page not found|no longer available|camera unavailable)/.test(txt);
+  } catch { return false; } finally { clearTimeout(t); }
+}
 const titleCase = (s) => String(s || '').toLowerCase().replace(/(^|[\s(/-])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(Sr|Us|I|Hwy)\b/g, (x) => x.toUpperCase());
 
 export default async function handler(req, res) {
@@ -67,11 +91,15 @@ export default async function handler(req, res) {
   const key = process.env.WINDY_WEBCAMS_KEY;
   const ca = lat > 32 && lat < 42.1 && lon > -124.6 && lon < -114, wa = lat > 45.5 && lat < 49.1 && lon > -124.9 && lon < -116.9, bc = lat > 48.2 && lat < 60.1 && lon > -139.1 && lon < -114;
   const errors = [];
+  // own=url1|url2… : the resort's built-in cams (preview image if it has one, else its player page) — report which work.
+  const own = String(req.query.own || '').split('|').filter(Boolean).slice(0, 16);
+  const ownP = Promise.all(own.map((u) => (/snapshot|avatar|thumbnail|\.jpe?g|\.png/i.test(u) ? imageOk(u) : pageOk(u))));
   const [w, c1, c2, c3] = await Promise.all([
     key ? windy(lat, lon, Math.min(km, 25), key).catch((e) => { errors.push(e.message); return []; }) : Promise.resolve([]),
     ca ? caltrans(lat, lon, km) : [], wa ? wsdot(lat, lon, km) : [], bc ? drivebc(lat, lon, km) : [],
   ]);
-  const road = [...c1, ...c2, ...c3].sort((a, b) => a.km - b.km).slice(0, 10);
+  const road = (await Promise.all([...c1, ...c2, ...c3].sort((a, b) => a.km - b.km).slice(0, 14).map(async (c) => (await imageOk(c.image)) ? c : null))).filter(Boolean).slice(0, 10);
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
-  res.status(200).json({ webcams: [...w.sort((a, b) => (a.km ?? 99) - (b.km ?? 99)), ...road], windy: !!key, errors });
+  const ownOk = await ownP;
+  res.status(200).json({ ownOk, webcams: [...w.sort((a, b) => (a.km ?? 99) - (b.km ?? 99)), ...road], windy: !!key, errors });
 }

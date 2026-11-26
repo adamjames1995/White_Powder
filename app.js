@@ -942,18 +942,19 @@ async function loadCams(r) {
   const el = () => document.getElementById('cams');
   let cams = camsCache.get(r.id);
   if (!cams || Date.now() - cams.at > 8 * 60 * 1000) { // Windy free-tier image tokens expire after 10 min
-    try { cams = { at: Date.now(), list: (await getJSON(`/api/webcams?lat=${r.lat}&lon=${r.lon}`)).webcams || [] }; }
+    const own = (r.cams || []).map((c) => c.preview || c.embed || c.link);
+    try { const j = await getJSON(`/api/webcams?lat=${r.lat}&lon=${r.lon}${own.length ? `&own=${encodeURIComponent(own.join('|'))}` : ''}`); cams = { at: Date.now(), list: j.webcams || [], ownOk: j.ownOk || [] }; }
     catch { cams = { at: Date.now(), list: [], error: true }; }
     camsCache.set(r.id, cams);
   }
   if (!el() || location.hash !== `#/resort/${r.id}`) return;
   // Resort's own cams first, then nearby cams from Windy (all with preview images where available).
   const all = [
-    ...(r.cams || []).map((c) => ({ name: c.name, embed: c.embed || null, link: c.link || null, preview: c.preview || null, live: true, src: 'resort' })),
+    ...(r.cams || []).filter((c, i) => cams.ownOk?.[i] !== false).map((c) => ({ name: c.name, embed: c.embed || null, link: c.link || null, preview: c.preview || null, live: true, src: 'resort' })),
     ...cams.list.map((c) => ({ name: c.title, embed: c.embed || null, link: c.link, preview: c.image, live: !!c.live, src: c.src || 'Windy', road: !!c.road, km: c.km })),
   ];
   const tile = (c, i) => `<button class="cam embed" data-i="${i}">
-      <div class="ph live">${c.preview ? `<img src="${esc(c.preview)}${c.preview.includes('?') ? '&' : '?'}t=${Math.floor(Date.now() / 300000)}" alt="" loading="lazy" onerror="this.remove()" />` : ''}<span class="play">${c.embed ? '▶' : c.preview ? '⤢' : '↗'}</span>${c.road ? `<span class="lv tl">ROAD CAM${c.km != null ? ` · ${Math.round(c.km)} km` : ''}</span>` : c.live ? '<span class="lv">LIVE</span>' : '<span class="lv tl">TIME-LAPSE</span>'}</div>
+      <div class="ph live">${c.preview ? `<img src="${esc(c.preview)}${c.preview.includes('?') ? '&' : '?'}t=${Math.floor(Date.now() / 300000)}" alt="" loading="lazy" onerror="this.closest('.cam')?.remove()" />` : ''}<span class="play">${c.embed ? '▶' : c.preview ? '⤢' : '↗'}</span>${c.road ? `<span class="lv tl">ROAD CAM${c.km != null ? ` · ${Math.round(c.km)} km` : ''}</span>` : c.live ? '<span class="lv">LIVE</span>' : '<span class="lv tl">TIME-LAPSE</span>'}</div>
       <span>${esc(c.name)}</span>
     </button>`;
   const official = `<a class="cam official" href="${esc(camsLink(r))}" target="_blank" rel="noopener"><div class="ph">📷</div><span>${r.camsUrl ? `All ${esc(r.name)} cams` : `Search ${esc(r.name)} webcams`} ↗</span></a>`;

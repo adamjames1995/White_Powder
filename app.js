@@ -439,7 +439,11 @@ function renderHome() {
   }
   const prefs = getPrefs();
   let { view, list, favCount } = shownList();
-  const cards = list.map((r) => {
+  const cards = list.map((r) => { try { return homeCard(r, prefs); } catch (e) {
+    console.error('card', r.id, e);
+    return `<div class="swc" data-id="${r.id}">${delBtn(r)}<a class="card rc" href="#/resort/${r.id}"><div class="rc-head"><div class="rc-title"><h2>${esc(r.name)}</h2><div class="sub">Tap for the full forecast</div></div></div></a></div>`;
+  } }).join('');
+  function homeCard(r, prefs) {
     const s = state.data[r.id]?.[getLevel()];
     const star = `<button class="star ${FAVS.has(r.id) ? 'on' : ''}" data-star="${r.id}" aria-label="${FAVS.has(r.id) ? 'Remove from' : 'Add to'} favorites">${FAVS.has(r.id) ? '★' : '☆'}</button>`;
     if (!s) {
@@ -454,14 +458,14 @@ function renderHome() {
           ${badge(r, 'sm')}
           <div class="rc-title">
             <h2><span class="rc-name">${esc(r.name)}</span>${passChip(r)}</h2>
-            <div class="sub">${driveChip(r) || `<span title="${LEVELS[getLevel()]} elevation">${levelFt(r).toLocaleString()}′</span> · `}<span title="${esc(r.state || r.country || '')}">${esc(placeAbbr(r))}</span><span class="depth" id="depth-${r.id}">${depthChip(r)}</span>${wx ? ` · <span class="wxmini ${wx.kind}" title="${esc(wx.label)} now">${WX_ICON[wx.kind]} ${WX_SHORT[wx.kind]}</span>` : ''}</div>
+            <div class="sub">${driveChip(r) || `<span title="${LEVELS[getLevel()]} elevation">${Number(levelFt(r) || 0).toLocaleString()}′</span> · `}<span title="${esc(r.state || r.country || '')}">${esc(placeAbbr(r))}</span><span class="depth" id="depth-${r.id}">${depthChip(r)}</span>${wx ? ` · <span class="wxmini ${wx.kind}" title="${esc(wx.label)} now">${WX_ICON[wx.kind]} ${WX_SHORT[wx.kind]}</span>` : ''}</div>
             <div class="mstatus" id="status-${r.id}">${statusLine(r)}</div>
           </div>
           <div class="rc-side">${star}${pd ? `<span class="powmini" title="Powder alert: ${inch(pd.snow)} ${dow(pd.date)}">❄${inch(pd.snow)}<b>${dow(pd.date)}</b></span>` : ''}</div>
         </div>
         <div class="scroller compact" data-strip="${r.id}"></div>
       </a></div>`;
-  }).join('');
+  }
   const empty = view === 'fav' && !favCount
     ? `<div class="card pad"><p>No favorites yet.</p><p class="small muted">Add mountains with <b>+</b>, or star ☆ one in the Epic or Ikon view.</p></div>`
     : !RESORTS.length ? `<div class="card pad"><p>No mountains yet.</p><a class="btn primary" href="#/manage">Add mountains</a></div>` : '';
@@ -668,7 +672,7 @@ const placeAbbr = (r) => { const p = r.state || r.country || ''; return ABBR[p] 
 function depthChip(r) {
   const o = snotelCache.get(r.id);
   if (hasStationDepth(r)) {
-    return ` · <span title="Measured at ${esc(r.snotel.name)} SNOTEL station${o.time ? ` · ${esc(obsTime(o.time))}` : ''}">Base <b>${o.depthIn}"</b></span>`;
+    return ` · <span title="Measured at ${esc(r.snotel?.name || 'nearby')} SNOTEL station${o.time ? ` · ${esc(obsTime(o.time))}` : ''}">Base <b>${o.depthIn}"</b></span>`;
   }
   if (modelDepth.has(r.id)) {
     const v = modelDepth.get(r.id);
@@ -918,7 +922,7 @@ function reportHtml(r, s) {
       <div class="tile"><div class="k">Snow depth</div><div class="v">${obs.depthIn ?? '–'}"</div></div>
       <div class="tile"><div class="k">Snow water equiv.</div><div class="v">${obs.sweIn != null ? `${obs.sweIn.toFixed(1)}"` : '–'}</div></div>
     </div>
-    <p class="small muted" style="margin:10px 0 0">${esc(r.snotel.name)} SNOTEL · ${esc(obsTime(obs.time))}. New snow is estimated from the rise in snow depth, so it runs a little low as snow settles.</p>`;
+    <p class="small muted" style="margin:10px 0 0">${esc(r.snotel?.name || 'nearby')} SNOTEL · ${esc(obsTime(obs.time))}. New snow is estimated from the rise in snow depth, so it runs a little low as snow settles.</p>`;
 }
 
 const obsPending = new Map();

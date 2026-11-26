@@ -946,10 +946,10 @@ async function loadCams(r) {
   // Resort's own cams first, then nearby cams from Windy (all with preview images where available).
   const all = [
     ...(r.cams || []).map((c) => ({ name: c.name, embed: c.embed || null, link: c.link || null, preview: c.preview || null, live: true, src: 'resort' })),
-    ...cams.list.map((c) => ({ name: c.title, embed: c.embed || null, link: c.link, preview: c.image, live: !!c.live, src: 'windy' })),
+    ...cams.list.map((c) => ({ name: c.title, embed: c.embed || null, link: c.link, preview: c.image, live: !!c.live, src: c.src || 'Windy', road: !!c.road, km: c.km })),
   ];
   const tile = (c, i) => `<button class="cam embed" data-i="${i}">
-      <div class="ph live">${c.preview ? `<img src="${esc(c.preview)}${c.preview.includes('?') ? '&' : '?'}t=${Math.floor(Date.now() / 300000)}" alt="" loading="lazy" onerror="this.remove()" />` : ''}<span class="play">${c.embed ? '▶' : '↗'}</span>${c.live ? '<span class="lv">LIVE</span>' : '<span class="lv tl">TIME-LAPSE</span>'}</div>
+      <div class="ph live">${c.preview ? `<img src="${esc(c.preview)}${c.preview.includes('?') ? '&' : '?'}t=${Math.floor(Date.now() / 300000)}" alt="" loading="lazy" onerror="this.remove()" />` : ''}<span class="play">${c.embed ? '▶' : c.preview ? '⤢' : '↗'}</span>${c.road ? `<span class="lv tl">ROAD CAM${c.km != null ? ` · ${Math.round(c.km)} km` : ''}</span>` : c.live ? '<span class="lv">LIVE</span>' : '<span class="lv tl">TIME-LAPSE</span>'}</div>
       <span>${esc(c.name)}</span>
     </button>`;
   const official = `<a class="cam official" href="${esc(camsLink(r))}" target="_blank" rel="noopener"><div class="ph">📷</div><span>${r.camsUrl ? `All ${esc(r.name)} cams` : `Search ${esc(r.name)} webcams`} ↗</span></a>`;
@@ -959,9 +959,16 @@ async function loadCams(r) {
     ${auto ? `<div class="cam-feature"><div class="cam-frame"><iframe id="cam-live" src="${esc(all[first].embed)}" title="${esc(all[first].name)} webcam" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe></div><div class="small muted cam-cap" id="cam-cap">${esc(all[first].name)} · auto-play is on (Alerts &amp; settings)</div></div>` : ''}
     <div class="camrow-in">${all.map(tile).join('')}${official}</div>
     ${!all.length ? '<p class="small muted">No cams found for this mountain yet — try the link above.</p>' : ''}
-    ${cams.list.length ? '<p class="small muted" style="margin:6px 0 0">Nearby cams via <a href="https://www.windy.com/webcams" target="_blank" rel="noopener">windy.com</a></p>' : ''}`;
+    ${cams.list.length ? `<p class="small muted" style="margin:6px 0 0">Nearby cams via ${[...new Set(cams.list.map((c) => c.src || 'Windy'))].map((x) => (x === 'Windy' ? '<a href="https://www.windy.com/webcams" target="_blank" rel="noopener">windy.com</a>' : x)).join(', ')}</p>` : ''}`;
   el().querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', () => {
     const c = all[Number(b.dataset.i)];
+    if (!c.embed && c.preview) { // snapshot cams (highway / Windy without a player): enlarge in the app
+      const m = modal(`<div class="cam-h"><b>${esc(c.name)}</b><button class="circ sm" id="sc-x" aria-label="Close">✕</button></div>
+        <img class="ft-cam-big" src="${esc(c.preview)}${c.preview.includes('?') ? '&' : '?'}t=${Date.now()}" alt=""/>
+        <p class="small muted">${esc(c.src || '')}${c.km != null ? ` · ${Math.round(c.km)} km from ${esc(r.name)}` : ''} · snapshot refreshes every few minutes${c.link && c.link !== c.preview ? ` · <a href="${esc(c.link)}" target="_blank" rel="noopener">open ↗</a>` : ''}</p>`);
+      m.querySelector('#sc-x').onclick = () => m.remove(); m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+      return;
+    }
     if (!c.embed) { window.open(c.link, '_blank', 'noopener'); return; }
     const live = document.getElementById('cam-live');
     if (live) { live.src = c.embed; document.getElementById('cam-cap').textContent = c.name; live.scrollIntoView({ block: 'center', behavior: 'smooth' }); }

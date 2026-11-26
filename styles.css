@@ -895,3 +895,6 @@ html[data-theme="light"] .rc-title .sub .wxmini.heavy, html[data-theme="light"] 
 .pk-item { display: flex; gap: 10px; align-items: center; padding: 9px 2px; border-bottom: 1px solid var(--border); }
 .pk-item input { width: 20px; height: 20px; flex: none; }
 .cam-frame img.cam-snap { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* Pass toggles keep the same size whether they show text or the wordmark (no jump when tapped) */
+.seg-ctl.views .pass-epic, .seg-ctl.views .pass-ikon { min-width: 66px; justify-content: center; }
+.seg-ctl.views button { min-height: 32px; }

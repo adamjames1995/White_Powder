@@ -396,6 +396,33 @@ function askHome() {
   });
 }
 
+// Patch the home page in place: unchanged cards keep their DOM (strips, scroll, images), so
+// background updates (pass mountains measured, forecasts arriving, re-sorts) don't flash or jump.
+function morphHome(html) {
+  const t = document.createElement('template'); t.innerHTML = html.trim();
+  const sigOf = (el) => el.outerHTML;
+  const old = new Map(), oldOther = [];
+  for (const el of [...app.children]) (el.classList.contains('swc') && el.dataset.id ? old.set(el.dataset.id, el) : oldOther.push(el));
+  const final = [...t.content.children].map((n) => {
+    if (n.classList.contains('swc') && n.dataset.id) {
+      const o = old.get(n.dataset.id); old.delete(n.dataset.id);
+      if (o && o.dataset.sig === sigOf(n) && !o.classList.contains('removing')) return o;
+      if (o) { // card text changed: take the new card but keep the already-drawn snow strip (no re-draw / flash)
+        const sig = sigOf(n), os = o.querySelector('.scroller[data-strip]'), ns = n.querySelector('.scroller[data-strip]');
+        if (os && ns && os.dataset.mounted) ns.replaceWith(os);
+        n.dataset.sig = sig; return n;
+      }
+    } else {
+      const i = oldOther.findIndex((o) => o.dataset.sig === sigOf(n));
+      if (i >= 0) return oldOther.splice(i, 1)[0];
+    }
+    n.dataset.sig = sigOf(n); return n;
+  });
+  final.forEach((n, i) => { if (app.children[i] !== n) app.insertBefore(n, app.children[i] || null); });
+  const keep = new Set(final);
+  [...app.childNodes].forEach((c) => { if (!keep.has(c)) c.remove(); });
+}
+
 // Re-sort when depths / snow reports / drive times arrive (debounced, never mid-gesture).
 let resortTimer = 0;
 function scheduleResort() {
@@ -471,7 +498,7 @@ function renderHome() {
     : !RESORTS.length ? `<div class="card pad"><p>No mountains yet.</p><a class="btn primary" href="#/manage">Add mountains</a></div>` : '';
   const lvl = getLevel();
   const sortKey = getSort(), home = getHome(), needsHome = sortKey === 'drive' || sortKey === 'best';
-  app.innerHTML = `
+  const html = `
     <div class="homebar">
       <div class="seg-ctl views" role="tablist">
         <button data-view="fav" class="${view === 'fav' ? 'on' : ''}">★ Favs</button>
@@ -499,32 +526,38 @@ function renderHome() {
     ${empty}${cards}
     ${list.length ? legendKey() : ''}
     <p class="support"><a href="#" id="replay-tut">How White Powder works</a> · <a href="${VENMO_URL}" target="_blank" rel="noopener">♥ Support White Powder</a></p>`;
-  document.getElementById('replay-tut')?.addEventListener('click', (e) => { e.preventDefault(); showTutorial(); });
+  const homeKey = `${view}|${lvl}|${sortKey}`;
+  if (app.dataset.home === homeKey && app.querySelector('.homebar')) morphHome(html); // background update: patch only what changed
+  else {
+    app.innerHTML = html; app.dataset.home = homeKey;
+    [...app.children].forEach((el) => { el.dataset.sig = el.outerHTML; });
+  }
+  const bind = (sel, ev, fn) => app.querySelectorAll(sel).forEach((el) => { if (el.dataset.b) return; el.dataset.b = '1'; el.addEventListener(ev, fn); });
+  bind('#replay-tut', 'click', (e) => { e.preventDefault(); showTutorial(); });
 
-  app.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => {
-    localStorage.setItem(VIEW_KEY, b.dataset.view); renderHome();
-  }));
-  app.querySelectorAll('[data-level]').forEach((b) => b.addEventListener('click', () => {
-    localStorage.setItem(LEVEL_KEY, b.dataset.level); renderHome();
-  }));
+  bind('[data-view]', 'click', (e) => {
+    const v = e.currentTarget.dataset.view; if (v === (localStorage.getItem(VIEW_KEY) || 'fav')) return;
+    localStorage.setItem(VIEW_KEY, v); renderHome(); window.scrollTo(0, 0);
+  });
+  bind('[data-level]', 'click', (e) => { localStorage.setItem(LEVEL_KEY, e.currentTarget.dataset.level); renderHome(); });
   if (sortKey === 'order') sortable(app, '.swc[data-id]', { longPress: 450, onDrop: applyOrder });
-  app.querySelectorAll('[data-star]').forEach((b) => b.addEventListener('click', (e) => {
-    e.preventDefault(); e.stopPropagation();
+  bind('[data-star]', 'click', (e) => {
+    const b = e.currentTarget; e.preventDefault(); e.stopPropagation();
     if (!adoptExtra(b.dataset.star)) toggleFav(b.dataset.star);
     renderHome();
-  }));
-  app.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', (e) => {
-    e.preventDefault(); e.stopPropagation();
+  });
+  bind('[data-del]', 'click', (e) => {
+    const b = e.currentTarget; e.preventDefault(); e.stopPropagation();
     const w = b.closest('.swc');
     w.classList.add('removing');
     setTimeout(() => { removeMountain(b.dataset.del); renderHome(); }, 220);
-  }));
-  document.getElementById('sortby')?.addEventListener('change', async (e) => {
+  });
+  bind('#sortby', 'change', async (e) => {
     localStorage.setItem(SORT_KEY, e.target.value);
     if ((e.target.value === 'drive' || e.target.value === 'best') && !getHome()) await askHome();
     renderHome();
   });
-  document.getElementById('sethome')?.addEventListener('click', async () => { if (await askHome()) renderHome(); });
+  bind('#sethome', 'click', async () => { if (await askHome()) renderHome(); });
   if (needsHome) ensureDrive(list);
   mountStrips(false);
   list = list.filter((r) => !r.placeholder);
@@ -583,6 +616,9 @@ function mountStrips(labels, onlyId) {
     const s = state.data[r.id]?.[getLevel()];
     if (!s) return;
     const first = !el.dataset.mounted;
+    const sk = `${typeof scale === 'object' ? JSON.stringify(scale) : scale}`;
+    if (!first && !onlyId && el._s === s && el.dataset.scale === sk) return; // unchanged: leave it alone
+    el._s = s; el.dataset.scale = sk;
     const compact = el.classList.contains('compact');
     el.innerHTML = snowStrip(historyDays(r, s), s.days.slice(0, 15), last24Box(r, s, compact), scale, labels || el.dataset.labels === '1', compact);
     const histW = el.querySelector('.seg.hist')?.offsetWidth || 0;

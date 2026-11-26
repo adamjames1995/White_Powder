@@ -898,3 +898,42 @@ html[data-theme="light"] .rc-title .sub .wxmini.heavy, html[data-theme="light"] 
 /* Pass toggles keep the same size whether they show text or the wordmark (no jump when tapped) */
 .seg-ctl.views .pass-epic, .seg-ctl.views .pass-ikon { min-width: 66px; justify-content: center; }
 .seg-ctl.views button { min-height: 32px; }
+/* ---------- rider avatars ---------- */
+.rider { display: flex; align-items: center; gap: 12px; }
+.rider.big { flex-direction: column; text-align: center; gap: 6px; }
+.rider-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rider.big .rider-txt b { font-size: 20px; }
+.rider-title { font-family: 'WP Brand', Montserrat, system-ui, sans-serif; font-style: italic; font-weight: 800; font-size: 13px; letter-spacing: .02em; text-transform: uppercase;
+  background: linear-gradient(90deg, #8ecbff, #c9a7ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.rider-title.sm { font-size: 10px; }
+.av-bob { animation: avbob 2.6s ease-in-out infinite; transform-origin: 50% 100%; }
+@keyframes avbob { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-3px) rotate(-1.5deg); } }
+.av-spin { animation: avspin .6s cubic-bezier(.2,.8,.2,1.2); }
+@keyframes avspin { from { transform: rotate(-360deg) scale(.6); } to { transform: rotate(0) scale(1); } }
+.av-modal .modal-card { max-height: 88vh; overflow-y: auto; overscroll-behavior: contain; }
+.av-stage { display: flex; justify-content: center; padding: 10px 0 2px; background: radial-gradient(ellipse at 50% 70%, rgba(142,203,255,.22), transparent 70%); border-radius: 16px; }
+.av-roast { text-align: center; color: var(--muted, #9a9a9a); font-style: italic; min-height: 2.4em; margin: 6px 4px 10px; }
+.av-row { display: flex; gap: 8px; margin-bottom: 6px; }
+.av-row input { flex: 1; min-width: 0; }
+.av-sec { margin: 12px 0; }
+.av-sec h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted, #9a9a9a); }
+.av-sw { display: flex; flex-wrap: wrap; gap: 8px; }
+.av-sw button { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(255,255,255,.15); background: var(--c); padding: 0; transition: transform .15s; }
+.av-sw button.on { border-color: #fff; transform: scale(1.12); box-shadow: 0 0 0 2px rgba(142,203,255,.6); }
+.av-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.av-chips::-webkit-scrollbar { display: none; }
+.av-chips button { flex: none; padding: 7px 12px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: inherit; font-size: 13px; white-space: nowrap; }
+.av-chips button.on { background: #fff; color: #111; border-color: #fff; font-weight: 600; }
+.av-sec input[type=range] { width: 100%; accent-color: #8ecbff; }
+.ai-me-av { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.av-cta { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 14px; border: 1px dashed rgba(142,203,255,.5); background: rgba(142,203,255,.07); color: inherit; }
+.av-cta > span:nth-child(2) { display: flex; flex-direction: column; flex: 1; }
+.av-cta .chev { font-size: 24px; opacity: .6; }
+.set-rider { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.ai-mate .av { flex: none; }
+.av-pin { background: none !important; border: 0 !important; width: auto !important; height: auto !important; display: flex; flex-direction: column; align-items: center; filter: drop-shadow(0 2px 4px rgba(0,0,0,.5)); }
+.av-pin span { font-size: 10px; font-weight: 700; background: rgba(0,0,0,.65); color: #fff; padding: 1px 6px; border-radius: 6px; margin-top: -2px; }
+html[data-theme="light"] .av-chips button { border-color: rgba(0,0,0,.14); background: rgba(0,0,0,.04); }
+html[data-theme="light"] .av-chips button.on { background: #111; color: #fff; }
+html[data-theme="light"] .av-sw button { border-color: rgba(0,0,0,.15); }
+html[data-theme="light"] .av-sw button.on { border-color: #111; }

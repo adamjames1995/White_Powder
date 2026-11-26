@@ -1,5 +1,6 @@
 import { loadSkiArea, dist } from '/lib/skiarea.js';
 import { DayTracker } from '/lib/track.js';
+import { AV, DEFAULT_AV, randomAvatar, encodeAv, decodeAv, avatarSvg, avTitle, avMove, avGnar, avRide } from '/lib/avatar.js';
 import { plan, feedFor, LEVELS as AI_LEVELS, SNOW } from '/lib/plan.js';
 import { stayAdvice, hotelLinks, GOALS, VEHICLE_DEFAULT, chainLevel, chainAdvice, passAdvice, pickLeave, powderPick, packList, sampleRoute, googleMapsUrl, appleMapsUrl, fmtDur } from '/lib/drive.js';
 import { CATALOG, logoUrl, openingFor, passOf, PASSES, slug, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
@@ -1917,6 +1918,7 @@ const TOUR = [
   { route: () => '#/drive', sel: '.ft-cams', wait: 4000, title: 'Highway cams', text: 'Live highway cameras along the way — tap one to enlarge.' },
   // Powder AI
   { route: () => '#/ai', sel: '.ai-start', title: 'Powder AI: your ski day', text: 'Start a day on the mountain: a 3D map tracks runs, speed and vertical, shows live lift lines, plans your next run and lift while you ride up, and shares it with your ski squad.' },
+  { route: () => '#/ai', sel: '#ai-me-av', title: 'Build your rider', text: 'Make your skier or snowboarder: gear colors, flair (helmet mohawk, anyone?) and a title like "Certified Jerry". Your squad sees it on the live map.', tryit: 'Tap Build your rider to try it.' },
   { route: () => '#/ai', sel: '#ai-code, .code', title: 'Ski squad', text: 'Create a squad or join with a friend\'s 4-letter code to see each other on the map.' },
   // Settings
   { route: () => '#/', sel: '.top-actions a[href="#/settings"]', title: 'Settings', text: 'Light or dark mode, your vehicle, cam auto-play, and powder alerts when a big snow day is coming.' },
@@ -2028,6 +2030,7 @@ function renderAI() {
     </section>
     <section class="card pad stack">
       <h3 style="margin:0">Ski squad</h3>
+      <div id="ai-me-av" class="ai-me-av">${myAv() ? `${riderCard(myAv(), me.name)}<button class="btn sm" id="ai-av-edit">Edit rider</button>` : `<button class="av-cta" id="ai-av-edit">${avatarSvg(DEFAULT_AV, { size: 56, mode: 'badge' })}<span><b>Build your rider</b><span class="small muted">Pick your gear, flair and a title your friends will roast you for.</span></span><span class="chev">›</span></button>`}</div>
       <label class="ai-lbl">Your name <input id="ai-name" maxlength="20" value="${esc(me.name)}" placeholder="e.g. Adam" /></label>
       ${me.squad ? `<p>In squad <b class="code">${esc(me.squad)}</b> · <button class="linkbtn" id="ai-leave">Leave</button></p>` : `
       <div class="ai-row"><button class="btn" id="ai-create">Create squad</button><input id="ai-code" maxlength="4" placeholder="CODE" autocapitalize="characters" /><button class="btn" id="ai-join">Join</button></div>`}
@@ -2049,6 +2052,7 @@ function renderAI() {
   }));
   document.getElementById('ai-alerts').addEventListener('change', (e) => { setAiPrefs({ alerts: e.target.checked }); if (e.target.checked) askNotify(); });
   document.getElementById('ai-name').addEventListener('change', (e) => setAiMe({ name: e.target.value.trim() }));
+  document.getElementById('ai-av-edit')?.addEventListener('click', () => openAvatarBuilder(() => renderAI()));
   const smsg = (t) => { document.getElementById('ai-squad-msg').textContent = t; };
   const squadCall = async (body) => {
     const r = await fetch('/api/squad', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -2403,12 +2407,74 @@ function aiPrefSheet() {
   el.querySelector('#ai-ok').addEventListener('click', () => { el.remove(); AI.shownBest = null; aiUpdate(true); });
 }
 
+// ---------- Rider avatar: build your skier/snowboarder; your squad sees it on the map ----------
+const myAv = () => decodeAv(aiMe().av);
+const ROASTS = [
+  (a, n) => `${n} has been "almost ready" in the parking lot for 25 minutes.`,
+  (a, n) => `${n} will tell you about the one powder day in 2019. Again.`,
+  (a, n) => `${n}'s ${avRide(a) === 'board' ? 'board' : 'skis'} cost more than their car's last repair.`,
+  (a, n) => `${n} calls every groomer "basically powder".`,
+  (a, n) => `${n} has a goggle tan they're weirdly proud of.`,
+  (a, n) => `${n} is ${avRide(a) === 'board' ? 'sitting in the middle of the run' : 'merging without signaling'} right now.`,
+  (a, n) => `${n} packed three snacks and zero sunscreen.`,
+  (a, n) => `${n} says "one more run" like it's a legally binding contract.`,
+];
+const roast = (a, n) => ROASTS[(a.title * 7 + a.move * 3 + a.extra) % ROASTS.length](a, n || 'This rider');
+function riderCard(a, name, big) {
+  return `<div class="rider ${big ? 'big' : ''}">${avatarSvg(a, { size: big ? 150 : 64, cls: 'av-bob' })}
+    <div class="rider-txt"><b>${esc(name || 'Mystery rider')}</b><span class="rider-title">${esc(avTitle(a))}</span>
+    <span class="small muted">Signature move: <b>${esc(avMove(a))}</b></span><span class="small muted">Gnar level: ${esc(avGnar(a))}</span></div></div>`;
+}
+function openAvatarBuilder(onDone) {
+  let a = myAv() || randomAvatar();
+  const me = aiMe();
+  const sw = (k, colors) => `<div class="av-sw" data-k="${k}">${colors.map((c, i) => `<button style="--c:${Array.isArray(c) ? `linear-gradient(135deg,${c[0]},${c[1]})` : c}" data-i="${i}" aria-label="${k} ${i + 1}" class="${a[k] === i ? 'on' : ''}"></button>`).join('')}</div>`;
+  const chips = (k, list) => `<div class="av-chips" data-k="${k}">${list.map((t, i) => `<button data-i="${i}" class="${a[k] === i ? 'on' : ''}">${esc(Array.isArray(t) ? t[1] : t)}</button>`).join('')}</div>`;
+  const m = modal(`<div class="av-build">
+    <div class="cam-h"><b>Build your rider</b><button class="circ sm" id="av-x" aria-label="Close">✕</button></div>
+    <div class="av-stage" id="av-stage"></div>
+    <div class="av-roast small" id="av-roast"></div>
+    <div class="av-row"><button class="btn" id="av-dice">🎲 Shuffle</button><input id="av-name" maxlength="20" placeholder="Your name" value="${esc(me.name || '')}" /></div>
+    <div class="av-sec"><h4>Ride</h4>${chips('ride', AV.ride)}</div>
+    <div class="av-sec"><h4>Skin</h4>${sw('skin', AV.skin)}</div>
+    <div class="av-sec"><h4>Helmet ${avRide(a) === 'board' ? '& board' : ''}</h4>${sw('helmet', AV.helmet)}</div>
+    <div class="av-sec"><h4>Goggle lens</h4>${sw('lens', AV.lens.map((l) => [l[0], l[1]]))}</div>
+    <div class="av-sec"><h4>Jacket</h4>${sw('jacket', AV.jacket)}</div>
+    <div class="av-sec"><h4>Pants</h4>${sw('pants', AV.pants)}</div>
+    <div class="av-sec"><h4>Flair</h4>${chips('extra', AV.extra)}</div>
+    <div class="av-sec"><h4>Title</h4>${chips('title', AV.title)}</div>
+    <div class="av-sec"><h4>Signature move</h4>${chips('move', AV.move)}</div>
+    <div class="av-sec"><h4>Gnar level</h4><input type="range" id="av-gnar" min="0" max="${AV.gnar.length - 1}" value="${a.gnar}"/><div class="small muted" id="av-gnar-l"></div></div>
+    <button class="btn primary" id="av-save" style="width:100%">Save rider</button>
+    <p class="small muted" style="text-align:center;margin:8px 0 0">Your squad sees your rider on the Powder AI map.</p>
+  </div>`);
+  m.classList.add('av-modal');
+  const draw = (spin) => {
+    const name = m.querySelector('#av-name').value.trim();
+    m.querySelector('#av-stage').innerHTML = riderCard(a, name, true);
+    if (spin) { const v = m.querySelector('#av-stage .av'); v.classList.add('av-spin'); }
+    m.querySelector('#av-roast').textContent = roast(a, name);
+    m.querySelector('#av-gnar-l').textContent = avGnar(a);
+    m.querySelectorAll('[data-k]').forEach((g) => g.querySelectorAll('[data-i]').forEach((b) => b.classList.toggle('on', Number(b.dataset.i) === a[g.dataset.k])));
+  };
+  m.querySelectorAll('[data-k] [data-i]').forEach((b) => b.addEventListener('click', () => { a = { ...a, [b.closest('[data-k]').dataset.k]: Number(b.dataset.i) }; draw(false); }));
+  m.querySelector('#av-gnar').addEventListener('input', (e) => { a = { ...a, gnar: Number(e.target.value) }; draw(false); });
+  m.querySelector('#av-name').addEventListener('input', () => draw(false));
+  m.querySelector('#av-dice').addEventListener('click', () => { a = randomAvatar(); m.querySelector('#av-gnar').value = a.gnar; draw(true); });
+  m.querySelector('#av-x').onclick = () => m.remove();
+  m.querySelector('#av-save').addEventListener('click', () => {
+    setAiMe({ av: encodeAv(a), name: m.querySelector('#av-name').value.trim() || aiMe().name });
+    m.remove(); if (AI.tracker) syncSquad(); onDone?.();
+  });
+  draw(false);
+}
+
 async function syncSquad() {
   const me = aiMe(); if (!me.squad || !AI.tracker) return;
   const t = AI.tracker, f = AI.lastFix, cur = t.currentLift(), s = t.stats();
   try {
     await fetch('/api/squad', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'update', code: me.squad,
-      member: { id: me.id, name: me.name || 'Skier', lat: f?.lat, lon: f?.lon, state: t.state, lift: cur?.lift.name || '', plan: AI.sharedPlan || planText(AI.plan[0]), runs: s.runs, vertFt: s.vertFt } }) });
+      member: { id: me.id, name: me.name || 'Skier', av: me.av || '', lat: f?.lat, lon: f?.lon, state: t.state, lift: cur?.lift.name || '', plan: AI.sharedPlan || planText(AI.plan[0]), runs: s.runs, vertFt: s.vertFt } }) });
     const j = await (await fetch(`/api/squad?code=${me.squad}`)).json();
     AI.squad = (j.members || []).filter((m) => m.id !== me.id);
     AI.squadErr = '';
@@ -2420,13 +2486,15 @@ function renderSquad() {
   const me = aiMe();
   if (!me.squad) { el.innerHTML = '<h3 style="margin:0">Ski squad</h3><p class="small muted">Join or create a squad before starting your day to see friends here.</p>'; return; }
   el.innerHTML = `<h3 style="margin:0 0 6px">Squad <span class="code">${esc(me.squad)}</span></h3>` + (AI.squad.length
-    ? AI.squad.map((m) => `<div class="ai-mate"><span class="ai-av">${esc((m.name || '?')[0])}</span><div><b>${esc(m.name)}</b> <span class="small muted">${m.state === 'lift' ? `🚡 ${esc(m.lift || 'on a lift')}` : m.state === 'run' ? '⛷️ skiing' : '⏸'} · ${Math.max(0, Math.round((Date.now() - m.at) / 60000))}m ago</span>
+    ? AI.squad.map((m) => `<div class="ai-mate">${decodeAv(m.av) ? avatarSvg(decodeAv(m.av), { size: 40, mode: 'badge' }) : `<span class="ai-av">${esc((m.name || '?')[0])}</span>`}<div><b>${esc(m.name)}</b>${decodeAv(m.av) ? ` <span class="rider-title sm">${esc(avTitle(decodeAv(m.av)))}</span>` : ''} <span class="small muted">${m.state === 'lift' ? `🚡 ${esc(m.lift || 'on a lift')}` : m.state === 'run' ? '⛷️ skiing' : '⏸'} · ${Math.max(0, Math.round((Date.now() - m.at) / 60000))}m ago</span>
         <div class="small secondary">${m.runs} runs · ${Number(m.vertFt).toLocaleString()} ft${m.plan ? ` · next: ${esc(m.plan)}` : ''}</div></div></div>`).join('')
     : `<p class="small muted">${AI.squadErr || 'Nobody else in the squad is out yet. Share the code!'}</p>`);
   if (AI.map && AI.layers && window.maplibregl) {
     AI.layers.mates.forEach((x) => x.remove()); AI.layers.mates = [];
     for (const m of AI.squad) if (Number.isFinite(m.lat)) {
-      const d = document.createElement('div'); d.className = 'ai-matepin'; d.textContent = (m.name || '?')[0]; d.title = m.name;
+      const d = document.createElement('div'); d.title = m.name; const av = decodeAv(m.av);
+      if (av) { d.className = 'ai-matepin av-pin'; d.innerHTML = `${avatarSvg(av, { size: 38, mode: 'badge' })}<span>${esc(m.name || '')}</span>`; }
+      else { d.className = 'ai-matepin'; d.textContent = (m.name || '?')[0]; }
       AI.layers.mates.push(new maplibregl.Marker({ element: d }).setLngLat([m.lon, m.lat]).addTo(AI.map));
     }
   }
@@ -2756,6 +2824,11 @@ async function renderSettings() {
     <a class="back" href="#/">‹ Back</a>
     <h1 class="title">Settings</h1>
     <section class="section stack">
+      <h3>Your rider</h3>
+      <div class="card pad set-rider">${myAv() ? riderCard(myAv(), aiMe().name) : '<p class="small muted" style="margin:0">No rider yet. Build one and your ski squad will see it on the map.</p>'}
+      <button class="btn" id="set-av">${myAv() ? 'Edit rider' : 'Build your rider'}</button></div>
+    </section>
+    <section class="section stack">
       <h3>Appearance</h3>
       <div class="seg-ctl theme-ctl" role="radiogroup" aria-label="Appearance">
         ${[['system', 'Match iPhone'], ['light', 'Light'], ['dark', 'Dark'], ['time', 'Time of day']].map(([k, v]) => `<button data-theme-opt="${k}" class="${theme === k ? 'on' : ''}" role="radio" aria-checked="${theme === k}">${v}</button>`).join('')}
@@ -2807,6 +2880,7 @@ async function renderSettings() {
     try { localStorage.setItem('wp:theme:v1', b.dataset.themeOpt); } catch {}
     window.wpTheme?.(); renderSettings();
   }));
+  document.getElementById('set-av')?.addEventListener('click', () => openAvatarBuilder(() => renderSettings()));
   document.getElementById('cam-auto')?.addEventListener('change', (e) => { try { localStorage.setItem(CAM_AUTO_KEY, e.target.checked ? '1' : '0'); } catch {} msg(e.target.checked ? 'Cams will auto-play.' : 'Cams will wait for a tap.'); });
 
   document.getElementById('enable')?.addEventListener('click', async (e) => {

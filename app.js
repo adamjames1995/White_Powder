@@ -20,7 +20,7 @@ const byId = (id) => RESORTS.find((r) => r.id === id) || EXTRA.find((r) => r.id 
 const VIEW_KEY = 'wp:view:v1';
 const LEVEL_KEY = 'wp:level:v1';
 const LEVELS = { summit: 'Summit', mid: 'Mid', base: 'Base' };
-const getLevel = () => { const v = localStorage.getItem(LEVEL_KEY); return LEVELS[v] ? v : 'summit'; };
+const getLevel = () => { const v = localStorage.getItem(LEVEL_KEY); return LEVELS[v] ? v : 'mid'; };
 const levelFt = (r, lvl = getLevel()) => (lvl === 'base' ? r.baseFt : lvl === 'mid' ? midFt(r) : r.summitFt);
 const DONATE_KEY = 'wp:donate-seen:v1';
 const VENMO_URL = 'https://venmo.com/u/adamjames95';

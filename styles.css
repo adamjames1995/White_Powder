@@ -834,3 +834,10 @@ html[data-theme="light"] .tabbar a.on { color: #111; background: rgba(255,255,25
 .tabbar a { width: 104px; font-size: 12px; }
 
 .ft-pack input { flex: none; }
+
+/* brand type to match the WHITE POWDER wordmark (heavy italic caps) */
+@font-face { font-family: 'WP Brand'; font-style: italic; font-weight: 800; font-display: swap; src: url('/vendor/fonts/montserrat-latin-800-italic.woff2') format('woff2'); }
+.brand-title { font-family: 'WP Brand', -apple-system, sans-serif; font-style: italic; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.ai-title.brand-title { font-size: 24px; }
+.tabbar a { font-family: 'WP Brand', -apple-system, sans-serif; font-style: italic; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; font-size: 11px; padding: 11px 0; }
+.tabbar a span, .tabbar .ai-live { display: none; }

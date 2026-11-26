@@ -1786,7 +1786,7 @@ function renderAI() {
   const mts = aiMountains();
   const seg = (name, opts, cur) => `<div class="seg-ctl ai-seg" data-pref="${name}">${Object.entries(opts).map(([k, v]) => `<button data-v="${k}" class="${k === cur ? 'on' : ''}">${v}</button>`).join('')}</div>`;
   app.innerHTML = `
-    <h1 class="title ai-title">⚡ Powder AI</h1>
+    <h1 class="title ai-title brand-title">Powder AI</h1>
     <p class="secondary ai-lede">Tracks your runs, speed and vertical, shows live lift lines, and plans your next lift while you ride up.</p>
     <section class="card pad stack">
       <label class="ai-lbl">Mountain
@@ -1866,7 +1866,7 @@ async function aiNotify(title, body) {
 function renderAIDay(day) {
   app.innerHTML = `
     <div class="ai-head">
-      <div><h1 class="title ai-title" style="margin:0">⚡ ${esc(day.name)}</h1><div class="small muted" id="ai-clock"></div></div>
+      <div><h1 class="title ai-title brand-title" style="margin:0">${esc(day.name)}</h1><div class="small muted" id="ai-clock"></div></div>
       <button class="btn sm" id="ai-end">End day</button>
     </div>
     <div class="ai-banner" id="ai-banner" hidden></div>
@@ -2242,7 +2242,7 @@ function renderDrive() {
   const chair = p.chair || FIRST_CHAIR[dest.id] || '09:00';
   const dayNames = [0, 1, 2, 3].map((k) => (k === 0 ? 'Today' : k === 1 ? 'Tomorrow' : new Date(Date.now() + k * 864e5).toLocaleDateString('en-US', { weekday: 'short' })));
   app.innerHTML = `
-    <h1 class="title ai-title">🚗 First Tracks</h1>
+    <h1 class="title ai-title brand-title">First Tracks</h1>
     <section class="card pad stack ft-controls">
       <label class="ai-lbl">Heading to <select id="ft-dest">${mts.map((m) => `<option value="${esc(m.id)}" ${m.id === dest.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
       <div class="ft-row"><button class="linkbtn" id="ft-from">📍 From ${home ? esc(home.label) : 'your location'} · change</button></div>
@@ -2731,7 +2731,7 @@ async function hardRefresh() {
 (() => {
   const nav = document.createElement('nav');
   nav.className = 'tabbar';
-  nav.innerHTML = `<a href="#/" data-tab="fc"><span>❄️</span>Forecast</a><a href="#/drive" data-tab="drive"><span>🚗</span>First Tracks</a><a href="#/ai" data-tab="ai"><span>⚡</span>Powder AI<i class="ai-live" hidden></i></a>`;
+  nav.innerHTML = `<a href="#/" data-tab="fc">Forecast</a><a href="#/drive" data-tab="drive">First Tracks</a><a href="#/ai" data-tab="ai">Powder AI</a>`;
   document.body.appendChild(nav);
   document.body.classList.add('has-tabs');
   const sync = () => {
@@ -2739,7 +2739,6 @@ async function hardRefresh() {
     nav.querySelector('[data-tab=fc]').classList.toggle('on', !ai && !dr);
     nav.querySelector('[data-tab=drive]').classList.toggle('on', dr);
     nav.querySelector('[data-tab=ai]').classList.toggle('on', ai);
-    nav.querySelector('.ai-live').hidden = !aiDay(); // red dot while a ski day is being tracked
   };
   addEventListener('hashchange', sync); sync(); setInterval(sync, 5000);
 })();

@@ -1,3 +1,6 @@
+import { loadSkiArea } from '/lib/skiarea.js';
+import { DayTracker } from '/lib/track.js';
+import { plan, feedFor, LEVELS as AI_LEVELS, SNOW } from '/lib/plan.js';
 import { CATALOG, logoUrl, openingFor, passOf, PASSES, slug, RESORTS as DEFAULT_RESORTS } from '/lib/resorts.js';
 import { loadResorts, sumDays, MODELS, midFt } from '/lib/snow.js';
 import { fetchDetail, compass } from '/lib/detail.js';
@@ -180,6 +183,7 @@ function render() {
   if (view === 'resort' && byId(id)) return renderResort(byId(id));
   if (view === 'settings') return renderSettings();
   if (view === 'manage') return renderManage();
+  if (view === 'ai') return renderAI();
   renderHome();
 }
 
@@ -806,7 +810,17 @@ function renderResort(r) {
     const el = document.getElementById('status-d');
     if (!el || location.hash !== `#/resort/${r.id}`) return;
     const link = (st && st.url) || r.camsUrl || null;
-    el.innerHTML = statusLine(r) + (link ? ` <a class="slink" href="${esc(link)}" target="_blank" rel="noopener">Resort status ↗</a>` : '');
+    const hasLifts = st?.lifts?.length;
+    el.innerHTML = statusLine(r) + (hasLifts ? ` <button class="slink linkbtn" id="liftlines">${st.hasWaits ? 'Lift lines' : 'Lifts'} ›</button>` : '') + (link ? ` <a class="slink" href="${esc(link)}" target="_blank" rel="noopener">Resort status ↗</a>` : '');
+    document.getElementById('liftlines')?.addEventListener('click', () => {
+      const rank = { open: 0, hold: 1, scheduled: 2, closed: 3 };
+      const ls = [...st.lifts].sort((a, b) => rank[a.status] - rank[b.status] || (a.wait ?? 99) - (b.wait ?? 99));
+      const m = modal(`<div class="cam-h"><b>${esc(r.name)} lifts</b><button class="circ sm" id="ll-x" aria-label="Close">✕</button></div>
+        <div class="ll-list">${ls.map((l) => `<div class="ll"><span class="sdot ${l.status}"></span><span class="ll-n">${esc(l.name)}</span><span class="ll-w ${l.wait >= 10 ? 'err' : l.wait != null ? 'good' : 'muted'}">${l.status !== 'open' ? esc(l.status) : l.wait != null ? `${l.wait} min` : '—'}</span></div>`).join('')}</div>
+        <p class="small muted">${st.hasWaits ? 'Wait times from the resort, updated every few minutes.' : 'This resort doesn\'t publish wait times.'}</p>`);
+      m.querySelector('#ll-x').onclick = () => m.remove();
+      m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+    });
   });
   // Mount the map only when it's about to scroll into view (saves data).
   // Load trail maps when the section is about to scroll into view (saves data).
@@ -1665,6 +1679,7 @@ async function waitFor(sel, ms = 12000) {
 const tourResort = () => (shownList().list[0] || RESORTS[0])?.id;
 const TOUR = [
   { sel: '.levelbar', title: 'Summit, Mid or Base', text: 'Switch every forecast to that elevation. Warm storms can be rain at the base and powder up top.', tryit: 'Pick your favorite now — tap Summit, Mid or Base.' },
+  { sel: '.tabbar [data-tab=ai]', title: 'Powder AI', text: 'On the mountain, start a ski day here: it tracks runs, speed and vertical, shows live lift lines, plans your next lift while you ride up, and connects your ski squad.' },
   { sel: '.sortpill', title: 'Sort', text: 'Order mountains by closest drive, deepest base, most new snow, or best snow per hour of driving.' },
   { sel: '.card.rc .mstatus', title: 'Open or closed', text: 'Live from the resort\'s lift feed. The green circle fills with the share of lifts running; closed resorts show their expected opening date.' },
   { sel: '.card.rc .scroller', title: 'Snow for the next 10 days', text: 'White bars are snow, blue is a rain/snow mix. Swipe right to see the past 15 days, left for days 11–15. Last 24h is measured at the nearest snow station.', tryit: 'Try it — swipe the bars sideways.' },
@@ -1736,6 +1751,364 @@ function startTour(intro = '') {
   addEventListener('resize', place); addEventListener('scroll', place, true);
   const tick = setInterval(() => (alive ? place() : clearInterval(tick)), 400);
   show();
+}
+
+// =====================================================================
+// ---------- Powder AI: live ski tracking, stats, game plan, ski squad ----------
+// =====================================================================
+const AI_DAY_KEY = 'wp:aiday:v1', AI_HIST_KEY = 'wp:aidays:v1', AI_PREF_KEY = 'wp:aiprefs:v1', AI_ME_KEY = 'wp:aime:v1';
+const AI = { tracker: null, area: null, feed: null, watch: null, wake: null, map: null, layers: null, plan: [], shownBest: null, squad: [], timers: [], lastFix: null, lastSave: 0, err: '' };
+const aiPrefs = () => { try { return { level: 'blue', snow: 'any', alerts: true, ...JSON.parse(localStorage.getItem(AI_PREF_KEY) || '{}') }; } catch { return { level: 'blue', snow: 'any', alerts: true }; } };
+const setAiPrefs = (p) => { try { localStorage.setItem(AI_PREF_KEY, JSON.stringify({ ...aiPrefs(), ...p })); } catch {} };
+const aiMe = () => {
+  let m; try { m = JSON.parse(localStorage.getItem(AI_ME_KEY) || 'null'); } catch {}
+  if (!m) { m = { id: Math.random().toString(36).slice(2, 12), name: '', squad: '' }; try { localStorage.setItem(AI_ME_KEY, JSON.stringify(m)); } catch {} }
+  return m;
+};
+const setAiMe = (p) => { try { localStorage.setItem(AI_ME_KEY, JSON.stringify({ ...aiMe(), ...p })); } catch {} };
+const aiDay = () => { try { return JSON.parse(localStorage.getItem(AI_DAY_KEY) || 'null'); } catch { return null; } };
+const fmtMin = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`);
+const DIFF_DOT = { green: '🟢', blue: '🔵', black: '⚫', expert: '◆◆' };
+const aiMountains = () => {
+  const seen = new Set(RESORTS.map((r) => r.name));
+  return [...RESORTS.map((r) => ({ id: r.id, name: r.name, lat: r.lat, lon: r.lon, liftie: r.liftie || null })),
+    ...CATALOG.filter((c) => !seen.has(c.name)).map((c) => ({ id: `c-${slug(c.name)}`, name: c.name, lat: c.lat, lon: c.lon, liftie: null }))];
+};
+
+function renderAI() {
+  const day = aiDay();
+  if (day) return renderAIDay(day);
+  stopTracking();
+  const p = aiPrefs(), me = aiMe();
+  const hist = (() => { try { return JSON.parse(localStorage.getItem(AI_HIST_KEY) || '[]'); } catch { return []; } })();
+  const mts = aiMountains();
+  const seg = (name, opts, cur) => `<div class="seg-ctl ai-seg" data-pref="${name}">${Object.entries(opts).map(([k, v]) => `<button data-v="${k}" class="${k === cur ? 'on' : ''}">${v}</button>`).join('')}</div>`;
+  app.innerHTML = `
+    <h1 class="title ai-title">⚡ Powder AI</h1>
+    <p class="secondary ai-lede">Tracks your runs, speed and vertical, shows live lift lines, and plans your next lift while you ride up.</p>
+    <section class="card pad stack">
+      <label class="ai-lbl">Mountain
+        <select id="ai-mtn">${mts.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</select>
+      </label>
+      <button class="linkbtn" id="ai-near">📍 Pick the mountain I'm at</button>
+      <div class="ai-lbl">Terrain${seg('level', { green: 'Greens', blue: 'Blues', black: 'Blacks', expert: 'Expert' }, p.level)}</div>
+      <div class="ai-lbl">Snow${seg('snow', { groomed: 'Groomed', powder: 'Powder', any: 'Either' }, p.snow)}</div>
+      <label class="opt"><input type="checkbox" id="ai-alerts" ${p.alerts ? 'checked' : ''}/> Tell me if a better line opens up mid-run</label>
+    </section>
+    <section class="card pad stack">
+      <h3 style="margin:0">Ski squad</h3>
+      <label class="ai-lbl">Your name <input id="ai-name" maxlength="20" value="${esc(me.name)}" placeholder="e.g. Adam" /></label>
+      ${me.squad ? `<p>In squad <b class="code">${esc(me.squad)}</b> · <button class="linkbtn" id="ai-leave">Leave</button></p>` : `
+      <div class="ai-row"><button class="btn" id="ai-create">Create squad</button><input id="ai-code" maxlength="4" placeholder="CODE" autocapitalize="characters" /><button class="btn" id="ai-join">Join</button></div>`}
+      <p class="small muted" id="ai-squad-msg">Friends with the same code see each other on the map and your game plan.</p>
+    </section>
+    <button class="btn primary ai-start" id="ai-start">Start ski day</button>
+    <p class="small muted ai-note">Keep White Powder open with the screen on while you ski. iPhone pauses tracking when the phone locks.</p>
+    ${hist.length ? `<section class="section"><h3>Past days</h3>${hist.slice(0, 10).map((h) => `
+      <div class="card pad ai-past"><b>${esc(h.name)}</b> <span class="muted small">${new Date(h.start).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+      <div class="small secondary">${h.stats.runs} runs · ${h.stats.vertFt.toLocaleString()} ft · top ${h.stats.topMph} mph · ${h.stats.lifts} lifts</div></div>`).join('')}</section>` : ''}`;
+  // nearest default
+  const sel = document.getElementById('ai-mtn');
+  const pick = (lat, lon) => { const best = mts.map((m) => [m, Math.hypot(m.lat - lat, (m.lon - lon) * Math.cos(lat * Math.PI / 180))]).sort((a, b) => a[1] - b[1])[0]; if (best) sel.value = best[0].id; };
+  const home = getHome(); if (home) pick(home.lat, home.lon);
+  document.getElementById('ai-near').addEventListener('click', () => navigator.geolocation?.getCurrentPosition((g) => pick(g.coords.latitude, g.coords.longitude), () => alert('Couldn\'t get your location.'), { enableHighAccuracy: true, timeout: 10000 }));
+  app.querySelectorAll('[data-pref] button').forEach((b) => b.addEventListener('click', () => {
+    setAiPrefs({ [b.closest('[data-pref]').dataset.pref]: b.dataset.v });
+    b.parentElement.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  }));
+  document.getElementById('ai-alerts').addEventListener('change', (e) => { setAiPrefs({ alerts: e.target.checked }); if (e.target.checked) askNotify(); });
+  document.getElementById('ai-name').addEventListener('change', (e) => setAiMe({ name: e.target.value.trim() }));
+  const smsg = (t) => { document.getElementById('ai-squad-msg').textContent = t; };
+  const squadCall = async (body) => {
+    const r = await fetch('/api/squad', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 501) throw new Error('Squads need a one-time setup (free Upstash account) — ask Adam.');
+    if (!r.ok) throw new Error(j.error || 'Squad server error');
+    return j;
+  };
+  document.getElementById('ai-create')?.addEventListener('click', async () => {
+    try { const j = await squadCall({ action: 'create' }); setAiMe({ squad: j.code }); renderAI(); } catch (e) { smsg(e.message); }
+  });
+  document.getElementById('ai-join')?.addEventListener('click', async () => {
+    const code = document.getElementById('ai-code').value.trim().toUpperCase();
+    if (!/^[A-Z]{4}$/.test(code)) return smsg('Codes are 4 letters.');
+    try {
+      const r = await fetch(`/api/squad?code=${code}`); const j = await r.json();
+      if (r.status === 501) throw new Error('Squads need a one-time setup (free Upstash account) — ask Adam.');
+      if (!j.exists) return smsg('No squad with that code (they expire overnight).');
+      setAiMe({ squad: code }); renderAI();
+    } catch (e) { smsg(e.message); }
+  });
+  document.getElementById('ai-leave')?.addEventListener('click', () => { squadCall({ action: 'leave', code: me.squad, id: me.id }).catch(() => {}); setAiMe({ squad: '' }); renderAI(); });
+  document.getElementById('ai-start').addEventListener('click', () => {
+    const m = mts.find((x) => x.id === sel.value);
+    const d = { id: m.id, name: m.name, lat: m.lat, lon: m.lon, liftie: m.liftie, start: Date.now(), tracker: null };
+    try { localStorage.setItem(AI_DAY_KEY, JSON.stringify(d)); } catch {}
+    if (aiPrefs().alerts) askNotify();
+    renderAI();
+  });
+}
+
+function askNotify() {
+  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch {}
+}
+async function aiNotify(title, body) {
+  if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
+  const b = document.getElementById('ai-banner');
+  if (b) { b.innerHTML = `<b>${esc(title)}</b> ${esc(body)}`; b.hidden = false; setTimeout(() => { b.hidden = true; }, 15000); }
+  try {
+    if ('Notification' in window && Notification.permission === 'granted') (await navigator.serviceWorker?.ready)?.showNotification(title, { body, icon: '/icons/icon-192.png', tag: 'powder-ai' });
+  } catch {}
+}
+
+function renderAIDay(day) {
+  app.innerHTML = `
+    <div class="ai-head">
+      <div><h1 class="title ai-title" style="margin:0">⚡ ${esc(day.name)}</h1><div class="small muted" id="ai-clock"></div></div>
+      <button class="btn sm" id="ai-end">End day</button>
+    </div>
+    <div class="ai-banner" id="ai-banner" hidden></div>
+    <div class="ai-status" id="ai-status">Waiting for GPS…</div>
+    <div class="card ai-mapcard"><div id="ai-map" class="ai-map"></div><button class="circ sm ai-recenter" id="ai-recenter" aria-label="Center on me">◎</button></div>
+    <section class="card pad" id="ai-plan"></section>
+    <section class="ai-stats" id="ai-stats"></section>
+    <section class="card pad" id="ai-lines"></section>
+    <section class="card pad" id="ai-squad"></section>
+    <section class="section"><h3>Runs</h3><div id="ai-runs"></div></section>`;
+  document.getElementById('ai-end').addEventListener('click', () => {
+    if (!confirm('End your ski day and save the stats?')) return;
+    const t = AI.tracker;
+    if (t) {
+      t.finish();
+      const h = (() => { try { return JSON.parse(localStorage.getItem(AI_HIST_KEY) || '[]'); } catch { return []; } })();
+      h.unshift({ name: day.name, start: t.start || day.start, stats: t.stats() });
+      try { localStorage.setItem(AI_HIST_KEY, JSON.stringify(h.slice(0, 60))); } catch {}
+    }
+    localStorage.removeItem(AI_DAY_KEY); stopTracking(); renderAI();
+  });
+  document.getElementById('ai-recenter').addEventListener('click', () => { const f = AI.lastFix; if (f && AI.map) AI.map.setView([f.lat, f.lon], 16); });
+  // Tracking keeps running while you look at forecasts; coming back just redraws.
+  if (AI.watch != null && AI.dayId === day.id) { AI.map = null; drawAIMap(day); aiUpdate(true); return; }
+  startTracking(day);
+  AI.dayId = day.id;
+}
+
+async function startTracking(day) {
+  stopTracking(true);
+  // tracker (resume from saved state if the app was reloaded)
+  AI.tracker = new DayTracker({ saved: day.tracker || null });
+  AI.tracker.start ??= day.start;
+  // map geometry + live feed
+  loadSkiArea(day.id, day.lat, day.lon).then((area) => { AI.area = area; AI.tracker.area = area; drawAIMap(day); aiUpdate(); }).catch(() => { AI.err = 'Trail map data unavailable — stats still track.'; drawAIMap(day); aiUpdate(); });
+  const pullFeed = async () => {
+    if (!day.liftie) return;
+    try { AI.feed = await getJSON(`/api/status?id=${encodeURIComponent(day.liftie)}&ai=1`); AI.tracker.resortRuns = AI.feed.runs || []; } catch {}
+    aiUpdate(true);
+  };
+  pullFeed(); AI.timers.push(setInterval(pullFeed, 120000));
+  // GPS
+  if (!navigator.geolocation) { AI.err = 'This device has no GPS access.'; aiUpdate(); return; }
+  AI.watch = navigator.geolocation.watchPosition((g) => {
+    const c = g.coords;
+    aiOnFix({ t: g.timestamp, lat: c.latitude, lon: c.longitude, alt: c.altitude, acc: c.accuracy, speed: c.speed });
+  }, (e) => { AI.err = e.code === 1 ? 'Location is off for White Powder. Allow it in Settings → Privacy → Location → Safari Websites.' : 'Looking for GPS…'; aiUpdate(); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+  if (location.hostname === 'localhost') window.__aiFeed = aiOnFix; // test hook: replay a recorded day
+  function aiOnFix(f) {
+    AI.lastFix = { lat: f.lat, lon: f.lon, acc: f.acc, t: f.t };
+    const ev = AI.tracker.add(f);
+    if (ev?.type === 'run') aiToast(`Run ${AI.tracker.runs.length}: ${ev.run.name || 'run'} · ${ev.run.dropFt.toLocaleString()} ft · top ${ev.run.topMph} mph`);
+    if (ev?.type === 'ride') aiToast(`Lift ${AI.tracker.rides.length}${ev.ride.name ? `: ${ev.ride.name}` : ''} · +${ev.ride.climbFt.toLocaleString()} ft`);
+    if (ev && (ev.type === 'state' || ev.type === 'run' || ev.type === 'ride')) aiUpdate(true); else aiUpdate();
+    if (Date.now() - AI.lastSave > 15000) saveAIDay();
+  }
+  // keep the screen awake
+  const wake = async () => { try { if ('wakeLock' in navigator && document.visibilityState === 'visible') AI.wake = await navigator.wakeLock.request('screen'); } catch {} };
+  wake(); AI.onVis = () => { if (document.visibilityState === 'visible') wake(); else saveAIDay(); };
+  document.addEventListener('visibilitychange', AI.onVis);
+  // re-plan every minute; squad sync every 20 s
+  AI.timers.push(setInterval(() => aiUpdate(true), 60000));
+  AI.timers.push(setInterval(syncSquad, 20000)); syncSquad();
+  AI.timers.push(setInterval(() => { const el = document.getElementById('ai-clock'); if (el) el.textContent = aiClock(); }, 30000));
+}
+
+function stopTracking(keepDay) {
+  if (AI.watch != null) navigator.geolocation?.clearWatch(AI.watch);
+  AI.watch = null; AI.timers.forEach(clearInterval); AI.timers = [];
+  try { AI.wake?.release(); } catch {}
+  AI.wake = null;
+  if (AI.onVis) document.removeEventListener('visibilitychange', AI.onVis);
+  if (!keepDay && AI.tracker) saveAIDay();
+  AI.map?.remove?.(); AI.map = null; AI.layers = null; AI.dayId = null;
+}
+function saveAIDay() {
+  const d = aiDay(); if (!d || !AI.tracker) return;
+  d.tracker = AI.tracker.toJSON(); AI.lastSave = Date.now();
+  try { localStorage.setItem(AI_DAY_KEY, JSON.stringify(d)); } catch {}
+}
+const aiClock = () => { const t = AI.tracker; if (!t?.start) return ''; return `Out ${fmtMin(Math.round((Date.now() - t.start) / 60000))} · tracking${AI.wake ? ' · screen kept on' : ''}`; };
+function aiToast(t) {
+  const b = document.getElementById('ai-banner'); if (!b) return;
+  b.textContent = t; b.hidden = false; clearTimeout(aiToast.t); aiToast.t = setTimeout(() => { b.hidden = true; }, 6000);
+}
+
+async function drawAIMap(day) {
+  const el = document.getElementById('ai-map');
+  if (!el) return;
+  try { await loadLeaflet(); } catch { el.innerHTML = '<p class="pad small muted">Map unavailable.</p>'; return; }
+  if (AI.map) AI.map.remove();
+  const map = L.map(el, { zoomControl: false, attributionControl: true }).setView([day.lat, day.lon], 14);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(map);
+  AI.map = map;
+  AI.layers = { area: L.layerGroup().addTo(map), track: L.polyline([], { color: '#3987e5', weight: 4, opacity: .9 }).addTo(map), me: null, squad: L.layerGroup().addTo(map), labels: L.layerGroup().addTo(map) };
+  const COL = { green: '#1a9e3a', blue: '#2563eb', black: '#111', expert: '#111' };
+  if (AI.area) {
+    for (const r of AI.area.runs) L.polyline(r.coords, { color: COL[r.diff] || '#2563eb', weight: r.diff === 'expert' ? 2 : 3, opacity: .75, dashArray: r.diff === 'expert' ? '4 4' : null }).addTo(AI.layers.area).bindTooltip(`${r.name || 'Run'} · ${r.diff}`);
+    const b = L.latLngBounds(AI.area.lifts.flatMap((l) => l.coords));
+    if (b.isValid()) map.fitBounds(b.pad(0.05));
+  }
+  aiUpdate(true);
+}
+
+function aiMapLifts() {
+  if (!AI.map || !AI.area) return;
+  AI.layers.labels.clearLayers();
+  for (const l of AI.area.lifts) {
+    const f = feedFor(l, AI.feed?.lifts);
+    const closed = f && f.status && f.status !== 'open';
+    L.polyline(l.coords, { color: closed ? '#9ca3af' : '#dc2626', weight: 2.5, opacity: .95 }).addTo(AI.layers.labels);
+    const top = l.coords[0];
+    const label = `${esc(l.name)}${f?.wait != null && !closed ? ` · <b>${f.wait}m</b>` : closed ? ' · closed' : ''}`;
+    L.marker(top, { icon: L.divIcon({ className: `ai-liftlbl${closed ? ' closed' : f?.wait >= 10 ? ' long' : ''}`, html: label, iconSize: null }) }).addTo(AI.layers.labels);
+  }
+}
+
+function aiUpdate(full) {
+  if (!location.hash.startsWith('#/ai')) return;
+  const t = AI.tracker; if (!t) return;
+  const day = aiDay(); if (!day) return;
+  // status line
+  const st = document.getElementById('ai-status');
+  const last = t.pts[t.pts.length - 1];
+  const cur = t.currentLift();
+  if (st) {
+    st.className = `ai-status ${t.state}`;
+    st.textContent = AI.err && !last ? AI.err
+      : !last ? 'Waiting for GPS…'
+      : t.state === 'lift' ? `🚡 Riding ${cur?.lift.name || 'a lift'}`
+      : t.state === 'run' ? `⛷️ Skiing · ${Math.round((last.v || 0) * 2.237)} mph`
+      : '⏸ Standing by';
+  }
+  const clock = document.getElementById('ai-clock'); if (clock) clock.textContent = aiClock();
+  // map: track + me
+  if (AI.map && AI.layers) {
+    AI.layers.track.setLatLngs(t.pts.map((p) => [p.lat, p.lon]));
+    if (AI.lastFix) {
+      const ll = [AI.lastFix.lat, AI.lastFix.lon];
+      if (!AI.layers.me) AI.layers.me = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 3, fillColor: '#3987e5', fillOpacity: 1 }).addTo(AI.map);
+      else AI.layers.me.setLatLng(ll);
+    }
+    if (full) aiMapLifts();
+  }
+  if (full) aiPlan(cur, last);
+  // stats
+  const s = t.stats();
+  const tile = (v, k) => `<div class="ai-stat"><b>${v}</b><span>${k}</span></div>`;
+  const se = document.getElementById('ai-stats');
+  if (se) se.innerHTML = [
+    tile(s.runs, 'Runs'), tile(s.vertFt.toLocaleString(), 'Vertical ft'), tile(s.lifts, 'Lifts'), tile(`${s.topMph}`, 'Top mph'),
+    tile(`${s.avgMph}`, 'Avg mph'), tile(`${s.skiMi}`, 'Miles skied'), tile(fmtMin(s.skiMin), 'Time skiing'), tile(s.peakFt ? s.peakFt.toLocaleString() : '—', 'Peak ft'),
+    tile(s.vertPerHour.toLocaleString(), 'Vert ft / hr'), tile(fmtMin(s.liftMin), 'On lifts'), tile(s.groomedRuns, 'Groomed runs'), tile(s.avgRating ?? '—', 'Avg rating'),
+  ].join('') + (s.longest ? `<div class="ai-best small secondary">Longest run: <b>${esc(s.longest.name || 'unnamed')}</b> (${s.longest.distMi} mi)${s.favLift ? ` · Most ridden: <b>${esc(s.favLift)}</b>` : ''}</div>` : '');
+  // runs list
+  const re = document.getElementById('ai-runs');
+  if (re && (full || re.childElementCount !== t.runs.length)) {
+    re.innerHTML = t.runs.length ? t.runs.map((r, i) => `
+      <div class="card ai-run">
+        <div><b>${i + 1}. ${esc(r.name || 'Unnamed run')}</b> <span class="small">${DIFF_DOT[r.diff] || ''}</span>${r.groomed === true ? ' <span class="ai-tag">groomed</span>' : r.groomed === false ? ' <span class="ai-tag pow">ungroomed</span>' : ''}
+        <div class="small secondary">${r.dropFt.toLocaleString()} ft · ${r.distMi} mi · top ${r.topMph} mph · avg ${r.avgMph} mph · ${new Date(r.t0).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div></div>
+        <div class="ai-rate" data-run="${i}">${[1, 2, 3, 4, 5].map((n) => `<button data-n="${n}" class="${r.rating >= n ? 'on' : ''}" aria-label="Rate ${n}">❄</button>`).join('')}</div>
+      </div>`).reverse().join('') : '<p class="small muted">Your runs show up here as you ski. Rate each one 1–5 ❄.</p>';
+    re.querySelectorAll('.ai-rate button').forEach((b) => b.addEventListener('click', () => {
+      const run = t.runs[Number(b.parentElement.dataset.run)]; run.rating = Number(b.dataset.n); saveAIDay(); aiUpdate(true);
+    }));
+  }
+  // lift lines
+  const le = document.getElementById('ai-lines');
+  if (le && full) {
+    const ls = (AI.feed?.lifts || []).filter((l) => l.status === 'open');
+    const withWait = ls.filter((l) => l.wait != null).sort((a, b) => a.wait - b.wait);
+    le.innerHTML = `<h3 style="margin:0 0 6px">Lift lines now</h3>` + (withWait.length
+      ? `<div class="ai-chips">${withWait.map((l) => `<span class="ai-chip ${l.wait >= 10 ? 'long' : l.wait <= 2 ? 'short' : ''}">${esc(l.name.replace(/^#\d+\s*/, ''))} <b>${l.wait}m</b></span>`).join('')}</div>`
+      : `<p class="small muted">${AI.feed?.found ? `${ls.length} lifts open · this resort doesn't publish wait times.` : 'Live lift data isn\'t available for this mountain.'}</p>`);
+  }
+  renderSquad();
+}
+
+function aiPlan(cur, last) {
+  const pe = document.getElementById('ai-plan'); if (!pe) return;
+  const t = AI.tracker, p = aiPrefs();
+  if (!AI.area) { pe.innerHTML = `<h3 style="margin:0">Game plan</h3><p class="small muted">${AI.err || 'Loading the trail map…'}</p>`; return; }
+  const from = cur ? cur.lift.coords[cur.lift.coords.length - 1] : last ? [last.lat, last.lon] : null;
+  if (!from) { pe.innerHTML = '<h3 style="margin:0">Game plan</h3><p class="small muted">Waiting for your location…</p>'; return; }
+  const doneLifts = new Map(); t.rides.forEach((r) => r.name && doneLifts.set(r.name, (doneLifts.get(r.name) || 0) + 1));
+  const opts = plan(AI.area, from, { feedLifts: AI.feed?.lifts, resortRuns: AI.feed?.runs, level: p.level, snow: p.snow, doneRuns: new Set(t.runs.map((r) => r.name)), doneLifts });
+  // better-line alert: the lift we suggested now has a much longer line than the new best
+  const prev = AI.shownBest, best = opts[0];
+  if (p.alerts && prev && best && prev.lift.name !== best.lift.name) {
+    const pf = feedFor(prev.lift, AI.feed?.lifts);
+    const pw = pf?.status && pf.status !== 'open' ? 99 : pf?.wait ?? null;
+    if (pw != null && best.wait != null && pw - best.wait >= 5) aiNotify('Better line opened', `${best.lift.name} is ${best.wait} min vs ${pw >= 99 ? 'closed' : `${pw} min`} at ${prev.lift.name}.`);
+  }
+  AI.plan = opts; AI.shownBest = best || null;
+  pe.innerHTML = `<h3 style="margin:0 0 4px">${cur ? `Game plan from the top of ${esc(cur.lift.name)}` : 'Game plan from here'}</h3>
+    <div class="small muted" style="margin-bottom:8px">${AI_LEVELS[p.level]} · ${SNOW[p.snow]} snow · <a href="#/ai" id="ai-prefs">change</a></div>
+    ${opts.length ? opts.map((o, i) => `<div class="ai-opt${i ? '' : ' best'}">
+      <div class="ai-opt-n">${i + 1}</div>
+      <div><div>${o.run ? `Ski <b>${esc(o.run.name || 'the run below')}</b> ${DIFF_DOT[o.run.diff] || ''} → ` : 'Head to '}<b>${esc(o.lift.name)}</b>${o.wait != null ? ` · <span class="${o.wait >= 10 ? 'err' : 'good'}">${o.wait} min line</span>` : ''}</div>
+      <div class="small muted">${o.why.slice(0, 3).map(esc).join(' · ')}</div></div></div>`).join('')
+      : '<p class="small muted">No connected runs found from here yet — keep skiing and I\'ll update.</p>'}
+    ${aiMe().squad && opts[0] ? '<button class="btn sm" id="ai-shareplan">📣 Send plan to squad</button>' : ''}`;
+  document.getElementById('ai-prefs')?.addEventListener('click', (e) => { e.preventDefault(); aiPrefSheet(); });
+  document.getElementById('ai-shareplan')?.addEventListener('click', () => { AI.sharedPlan = planText(opts[0]); syncSquad(); aiToast('Plan sent to your squad.'); });
+}
+const planText = (o) => (o ? `${o.run ? `${o.run.name || 'run'} → ` : ''}${o.lift.name}${o.wait != null ? ` (${o.wait}m)` : ''}` : '');
+
+function aiPrefSheet() {
+  const p = aiPrefs();
+  const el = modal(`<h3>Game plan settings</h3>
+    <div class="ai-lbl">Terrain<div class="seg-ctl ai-seg" data-pref="level">${Object.entries(AI_LEVELS).map(([k, v]) => `<button data-v="${k}" class="${k === p.level ? 'on' : ''}">${v}</button>`).join('')}</div></div>
+    <div class="ai-lbl">Snow<div class="seg-ctl ai-seg" data-pref="snow">${Object.entries(SNOW).map(([k, v]) => `<button data-v="${k}" class="${k === p.snow ? 'on' : ''}">${v}</button>`).join('')}</div></div>
+    <label class="opt"><input type="checkbox" id="ai-al2" ${p.alerts ? 'checked' : ''}/> Better-line alerts</label>
+    <button class="btn primary" id="ai-ok">Done</button>`);
+  el.querySelectorAll('[data-pref] button').forEach((b) => b.addEventListener('click', () => { setAiPrefs({ [b.closest('[data-pref]').dataset.pref]: b.dataset.v }); b.parentElement.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); }));
+  el.querySelector('#ai-al2').addEventListener('change', (e) => { setAiPrefs({ alerts: e.target.checked }); if (e.target.checked) askNotify(); });
+  el.querySelector('#ai-ok').addEventListener('click', () => { el.remove(); AI.shownBest = null; aiUpdate(true); });
+}
+
+async function syncSquad() {
+  const me = aiMe(); if (!me.squad || !AI.tracker) return;
+  const t = AI.tracker, f = AI.lastFix, cur = t.currentLift(), s = t.stats();
+  try {
+    await fetch('/api/squad', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'update', code: me.squad,
+      member: { id: me.id, name: me.name || 'Skier', lat: f?.lat, lon: f?.lon, state: t.state, lift: cur?.lift.name || '', plan: AI.sharedPlan || planText(AI.plan[0]), runs: s.runs, vertFt: s.vertFt } }) });
+    const j = await (await fetch(`/api/squad?code=${me.squad}`)).json();
+    AI.squad = (j.members || []).filter((m) => m.id !== me.id);
+    AI.squadErr = '';
+  } catch { AI.squadErr = 'Squad offline'; }
+  renderSquad();
+}
+function renderSquad() {
+  const el = document.getElementById('ai-squad'); if (!el) return;
+  const me = aiMe();
+  if (!me.squad) { el.innerHTML = '<h3 style="margin:0">Ski squad</h3><p class="small muted">Join or create a squad before starting your day to see friends here.</p>'; return; }
+  el.innerHTML = `<h3 style="margin:0 0 6px">Squad <span class="code">${esc(me.squad)}</span></h3>` + (AI.squad.length
+    ? AI.squad.map((m) => `<div class="ai-mate"><span class="ai-av">${esc((m.name || '?')[0])}</span><div><b>${esc(m.name)}</b> <span class="small muted">${m.state === 'lift' ? `🚡 ${esc(m.lift || 'on a lift')}` : m.state === 'run' ? '⛷️ skiing' : '⏸'} · ${Math.max(0, Math.round((Date.now() - m.at) / 60000))}m ago</span>
+        <div class="small secondary">${m.runs} runs · ${Number(m.vertFt).toLocaleString()} ft${m.plan ? ` · next: ${esc(m.plan)}` : ''}</div></div></div>`).join('')
+    : `<p class="small muted">${AI.squadErr || 'Nobody else in the squad is out yet. Share the code!'}</p>`);
+  if (AI.map && AI.layers) {
+    AI.layers.squad.clearLayers();
+    for (const m of AI.squad) if (Number.isFinite(m.lat)) L.marker([m.lat, m.lon], { icon: L.divIcon({ className: 'ai-matepin', html: esc((m.name || '?')[0]), iconSize: [26, 26] }) }).addTo(AI.layers.squad).bindTooltip(m.name);
+  }
 }
 
 // ---------- in-app resort webcams (tap to play the resort's own live player) ----------
@@ -2077,6 +2450,24 @@ async function hardRefresh() {
     }
   }, { passive: true });
 })();
+
+// ---------- bottom tabs: Forecast · Powder AI ----------
+(() => {
+  const nav = document.createElement('nav');
+  nav.className = 'tabbar';
+  nav.innerHTML = `<a href="#/" data-tab="fc"><span>❄️</span>Forecast</a><a href="#/ai" data-tab="ai"><span>⚡</span>Powder AI<i class="ai-live" hidden></i></a>`;
+  document.body.appendChild(nav);
+  document.body.classList.add('has-tabs');
+  const sync = () => {
+    const ai = location.hash.startsWith('#/ai');
+    nav.querySelector('[data-tab=fc]').classList.toggle('on', !ai);
+    nav.querySelector('[data-tab=ai]').classList.toggle('on', ai);
+    nav.querySelector('.ai-live').hidden = !aiDay(); // red dot while a ski day is being tracked
+  };
+  addEventListener('hashchange', sync); sync(); setInterval(sync, 5000);
+})();
+// Resume tracking after a reload if a ski day is in progress.
+if (aiDay() && !location.hash.startsWith('#/ai')) { try { startTracking(aiDay()); AI.dayId = aiDay().id; } catch {} }
 
 // ---------- theme follows iOS / the clock while the app is open ----------
 window.matchMedia?.('(prefers-color-scheme: light)').addEventListener?.('change', () => window.wpTheme?.());

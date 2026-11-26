@@ -1062,7 +1062,7 @@ html[data-theme="light"] .tabbar a.on { background: rgba(255,255,255,.5); }
 .hol-valentine { --h1: #e11d48; --h2: #f472b6; } .hol-stpat { --h1: #15803d; --h2: #65a30d; } .hol-easter { --h1: #a78bfa; --h2: #f9a8d4; } .hol-halloween { --h1: #ea580c; --h2: #3b0764; }
 .hol-july4 { --h1: #1d4ed8; --h2: #b91c1c; } .hol-groundhog { --h1: #92400e; --h2: #0369a1; } .hol-mardigras { --h1: #6d28d9; --h2: #15803d; } .hol-aprilfools { --h1: #db2777; --h2: #0891b2; } .hol-birthday { --h1: #ec4899; --h2: #8b5cf6; }
 /* festive trim under the header */
-html[data-holiday]:not([data-holiday=""]) .topbar::after { content: ''; position: absolute; left: 0; right: 0; bottom: -4px; height: 4px; pointer-events: none;
+html[data-holiday].no-trim .topbar::after { content: ''; position: absolute; left: 0; right: 0; bottom: -4px; height: 4px; pointer-events: none;
   background: repeating-linear-gradient(90deg, var(--t1) 0 14px, var(--t2) 14px 28px, var(--t3) 28px 42px); animation: holtrim 6s linear infinite; opacity: .9; }
 @keyframes holtrim { to { background-position: 84px 0; } }
 html[data-holiday="thanksgiving"] { --t1: #b45309; --t2: #f59e0b; --t3: #9a3412; } html[data-holiday="christmas"] { --t1: #dc2626; --t2: #f8fafc; --t3: #16a34a; }

@@ -1899,7 +1899,6 @@ function logoDecor() {
   brand.title = `${h.name}!`;
 }
 function holidayBanner() {
-  return ''; // replaced by logo decorations (logoDecor) + falling emoji
   const h = holToday(); if (!h || localStorage.getItem(holKey())) return '';
   const title = h.key === 'birthday' ? `Happy birthday${aiMe().name ? `, ${esc(aiMe().name)}` : ''}!` : `${esc(h.name.replace(/^Happy /, 'Happy '))}${/!$/.test(h.name) ? '' : '!'}`;
   return `<div class="hol-banner hol-${h.key}"><span class="hol-emoji">${h.emoji}</span><div class="hol-txt"><b>${title}</b><span>${esc(HOL_LINE[h.key] || '')}</span></div>

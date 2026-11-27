@@ -115,20 +115,15 @@ const loadQ = { ids: new Set(), running: false, fails: new Map() };
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 // Haptic tick. Android: Vibration API. iPhone (iOS 18+): Safari has no vibrate(), but toggling a native
 // <input switch> plays the system haptic — so we click a hidden one. iOS only allows it during a touch.
-const haptic = (() => {
-  let lbl = null;
-  return (ms = 10) => {
-    try {
-      if (navigator.vibrate && navigator.vibrate(ms)) return;
-      if (!lbl) {
-        lbl = document.createElement('label'); lbl.setAttribute('aria-hidden', 'true');
-        lbl.style.cssText = 'position:fixed;left:-100px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden';
-        lbl.innerHTML = '<input type="checkbox" switch tabindex="-1">'; document.body.appendChild(lbl);
-      }
-      lbl.click();
-    } catch {}
-  };
-})();
+const haptic = (ms = 10) => {
+  try {
+    if (navigator.vibrate && navigator.vibrate(ms)) return;
+    // iOS 18+ Safari: toggling a native switch plays the system haptic (same trick as the ios-haptics library).
+    const label = document.createElement('label'); label.ariaHidden = 'true'; label.style.display = 'none';
+    const input = document.createElement('input'); input.type = 'checkbox'; input.setAttribute('switch', '');
+    label.appendChild(input); document.head.appendChild(label); label.click(); document.head.removeChild(label);
+  } catch {}
+};
 let rerenderTimer = 0;
 function rerenderHomeSoon() {
   clearTimeout(rerenderTimer);
@@ -3302,7 +3297,7 @@ async function hardRefresh() {
   if (location.hash.startsWith('#/resort/')) safeRender();
   const ok = state.fetchedAt !== before && !state.error;
   if (!ok) state.error = null;
-  miniToast(ok ? 'Updated just now' : 'Forecast service is slow right now — showing your saved forecast. Lift status refreshed.');
+  if (!ok) miniToast('Forecast service is slow right now — showing your saved forecast. Lift status refreshed.');
   if (!ok) safeRender();
 }
 function miniToast(text) {
@@ -3319,8 +3314,15 @@ function miniToast(text) {
   const TRIGGER = 70;
   let y0 = null, x0 = 0, pull = 0, busy = false;
   const blocked = (t) => sortActive || busy || document.querySelector('.tour, .modal') || (t instanceof Element && t.closest('.modal, .cam-frame, .leaflet-container, .maplibregl-canvas, .av3d'));
+  const appEl = document.getElementById('app');
+  const GAP = 56; // the spinner's own slot above the content while loading
+  const slide = (px, anim) => {
+    appEl.style.transition = anim ? 'transform .35s cubic-bezier(.2,.8,.2,1)' : 'none';
+    appEl.style.transform = px ? `translateY(${px}px)` : '';
+  };
   const show = (d) => {
     ind.style.setProperty('--pull', `${Math.min(d, TRIGGER * 1.4)}px`);
+    if (!busy) slide(Math.min(d, TRIGGER * 1.6), false);
     const ready = d >= TRIGGER;
     if (ready && !wasReady && !busy) haptic(8);
     wasReady = ready;
@@ -3344,10 +3346,16 @@ function miniToast(text) {
   document.addEventListener('touchend', async () => {
     if (y0 == null) return;
     y0 = null;
-    if (pull < TRIGGER) { ind.style.opacity = '0'; show(0); return; }
-    busy = true; ind.classList.add('spin'); haptic(12); show(TRIGGER);
+    if (pull < TRIGGER) { slide(0, true); ind.style.opacity = '0'; show(0); return; }
+    haptic(12);
+    busy = true; ind.classList.add('spin', 'held'); ind.style.opacity = '1';
+    slide(GAP, true);
+    const t0 = Date.now();
     try { await hardRefresh(); } finally {
-      busy = false; ind.classList.remove('spin', 'ready'); ind.style.opacity = '0'; show(0);
+      await sleep(Math.max(0, 900 - (Date.now() - t0))); // let the spinner sit for a beat
+      ind.style.opacity = '0';
+      slide(0, true);
+      setTimeout(() => { busy = false; ind.classList.remove('spin', 'ready', 'held'); show(0); }, 350);
     }
   }, { passive: true });
 })();

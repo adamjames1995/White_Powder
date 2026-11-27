@@ -1106,3 +1106,9 @@ html[data-theme="light"] .ptr-spin .sp { fill: #8e8e93; }
 .ptr.held { transform: translateY(8px); transition: opacity .25s, transform .35s cubic-bezier(.2,.8,.2,1); }
 #app { will-change: transform; }
 .spie.idle { opacity: .6; }
+/* home cards: status on line 1, hours / last report on its own line so nothing gets cut off */
+.rc-head .mstatus { flex-wrap: wrap; overflow: visible; white-space: normal; }
+.rc-head .mstatus .stext { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc-head .mstatus .snote { flex: 0 0 100%; white-space: normal; overflow: visible; padding-left: 20px; font-size: 11.5px; line-height: 1.3; }
+.rc-head .mstatus .ssep { display: none; }
+.ssep { font-style: normal; }

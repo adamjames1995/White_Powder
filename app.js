@@ -718,8 +718,8 @@ function statusLine(r) {
   const s = statusInfo(r);
   const st = statusCache.get(r.id)?.data;
   const pct = s.pctOf && s.pctOf[1] ? Math.round((s.pctOf[0] / s.pctOf[1]) * 100) : null;
-  if (pct != null) return `<span class="spie${s.idle ? ' idle' : ''}" style="--p:${pct}" title="${pct}% of lifts open"></span><span class="stext ${s.cls}">${esc(s.text)}</span>${s.note ? `<span class="snote"> · ${esc(s.note)}</span>` : ''}`;
-  return `<span class="sdot ${s.cls}"></span><span class="stext ${s.cls}">${esc(s.text)}</span>${s.note ? `<span class="snote"> · ${esc(s.note)}</span>` : ''}`;
+  if (pct != null) return `<span class="spie${s.idle ? ' idle' : ''}" style="--p:${pct}" title="${pct}% of lifts open"></span><span class="stext ${s.cls}">${esc(s.text)}</span>${s.note ? `<span class="snote"><i class="ssep"> · </i>${esc(s.note)}</span>` : ''}`;
+  return `<span class="sdot ${s.cls}"></span><span class="stext ${s.cls}">${esc(s.text)}</span>${s.note ? `<span class="snote"><i class="ssep"> · </i>${esc(s.note)}</span>` : ''}`;
 }
 
 // ---------- current snow depth ----------

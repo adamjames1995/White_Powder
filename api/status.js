@@ -1,3 +1,4 @@
+import { redis } from './_redis.js';
 // Live lift status read straight from each resort's own lift-status feed
 // (same sources Liftie uses: mtnpowder.com JSON for Alterra resorts, the TerrainStatusFeed on Vail Resorts pages).
 import vm from 'node:vm';
@@ -56,6 +57,23 @@ export function toRun(o) {
   return { name: String(o.Name).trim(), difficulty: dk ? String(o[dk] ?? '') : '', open, groomed };
 }
 
+// Lift hours if the feed publishes them (field names differ per resort): earliest open / latest close.
+const toMin = (v) => { const m = String(v ?? '').match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i); if (!m) return null; let h = +m[1]; const mm = +(m[2] || 0), ap = (m[3] || '').toLowerCase();
+  if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0; if (!ap && h < 7) h += 12; return h >= 5 && h <= 23 ? h * 60 + mm : null; };
+export function liftHours(raws) {
+  let open = null, close = null;
+  for (const l of raws || []) {
+    if (!l || typeof l !== 'object') continue;
+    for (const [k, v] of Object.entries(l)) {
+      if (v == null || typeof v === 'object') continue;
+      if (/^(open(ing)?time|opens?|starttime|hoursopen)$/i.test(k)) { const t = toMin(v); if (t != null && (open == null || t < open)) open = t; }
+      if (/^(clos(e|ing)time|closes?|endtime|hoursclose)$/i.test(k)) { const t = toMin(v); if (t != null && (close == null || t > close)) close = t; }
+      if (/^hours$/i.test(k) && typeof v === 'string') { const m = v.split(/[-–to]+/i); if (m.length >= 2) { const a = toMin(m[0]), b = toMin(m[m.length - 1]); if (a != null && (open == null || a < open)) open = a; if (b != null && (close == null || b > close)) close = b; } }
+    }
+  }
+  return open != null && close != null && close > open ? { open, close } : null;
+}
+
 export function fromMtnpowder(arr) {
   const list = (Array.isArray(arr) ? arr : []).map((l) => ({
     name: String(l.Name || '').trim(), raw: String(l.StatusEnglish || l.Status || '').trim(), status: coerce(l.StatusEnglish || l.Status),
@@ -63,6 +81,7 @@ export function fromMtnpowder(arr) {
   }));
   list.runsRaw = (Array.isArray(arr) ? arr : []).flatMap((l) => (Array.isArray(l.Trails) ? l.Trails : []));
   list.runs = list.runsRaw.map(toRun).filter(Boolean);
+  list.hours = liftHours(arr);
   return list;
 }
 
@@ -87,6 +106,8 @@ export function fromVailHtml(html) {
   lifts.runsRaw = (f.GroomingAreas || []).flatMap((a) => [...(a.Runs || []), ...(a.Trails || [])]);
   lifts.runs = lifts.runsRaw.map(toRun).filter(Boolean);
   lifts.areaKeys = [...new Set((f.GroomingAreas || []).flatMap((a) => Object.keys(a)))];
+  lifts.hours = liftHours([...seen.values()]);
+  lifts.liftKeys = [...new Set([...seen.values()].flatMap((l) => Object.keys(l)))];
   const m = html.match(/(\d+)\s*(?:<[^>]+>\s*)*\/\s*(?:<[^>]+>\s*)*(\d+)(?:\s*<[^>]+>)*\s*Lifts\s*Open/i);
   if (m) lifts.pageCount = { open: Number(m[1]), total: Number(m[2]) };
   return lifts;
@@ -123,8 +144,14 @@ export default async function handler(req, res) {
     const seenRun = new Set();
     const runs = (lifts.runs || []).filter((x) => !seenRun.has(x.name) && seenRun.add(x.name)).slice(0, 400);
     const liftList = lifts.filter((l, i, a) => a.findIndex((x) => x.name === l.name) === i).map(({ name, status, wait }) => ({ name, status, wait }));
-    res.status(200).json({ found: true, id, url: feed.page || feed.url, ...sum, lifts: liftList, runs, hasWaits: liftList.some((l) => l.wait != null), source: 'resort lift-status feed', fetchedAt: new Date().toISOString(),
-      ...(req.query.debug === 'runs' ? { runKeys: [...new Set((lifts.runsRaw || []).flatMap((o) => Object.keys(o)))], areaKeys: lifts.areaKeys, sample: (lifts.runsRaw || []).slice(0, 2) } : {}) });
+    // Remember the most recent time lifts were running, so overnight we can still say "5 lifts open (last report)".
+    let last = null;
+    try {
+      if (sum.open > 0) { last = { open: sum.open, total: sum.total, at: new Date().toISOString() }; await redis('SET', `wp:lastopen:${id}`, JSON.stringify(last), 'EX', 60 * 60 * 24 * 21); }
+      else { const v = await redis('GET', `wp:lastopen:${id}`); last = v ? JSON.parse(v) : null; }
+    } catch { /* Redis optional */ }
+    res.status(200).json({ found: true, id, url: feed.page || feed.url, ...sum, lastOpen: last, hours: lifts.hours || null, lifts: liftList, runs, hasWaits: liftList.some((l) => l.wait != null), source: 'resort lift-status feed', fetchedAt: new Date().toISOString(),
+      ...(req.query.debug === 'runs' ? { liftKeys: lifts.liftKeys, runKeys: [...new Set((lifts.runsRaw || []).flatMap((o) => Object.keys(o)))], areaKeys: lifts.areaKeys, sample: (lifts.runsRaw || []).slice(0, 2) } : {}) });
   } catch (e) {
     res.status(req.query.debug ? 200 : 502).json({ error: e.message || String(e), url: feed.page || feed.url });
   }

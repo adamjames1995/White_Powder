@@ -660,33 +660,65 @@ async function loadStatus(r) {
 const fmtDate = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const todayIso = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60e3).toISOString().slice(0, 10);
 
+// Lift hours: from the resort's feed when it publishes them, else known/typical hours (minutes after midnight).
+const HOURS = { kirkwood: [540, 960], palisades: [540, 960], whistler: [510, 960], stevens: [540, 960], crystal: [540, 960] };
+const hoursFor = (r) => {
+  const st = statusCache.get(r.id)?.data;
+  if (st?.hours?.open != null) return { open: st.hours.open, close: st.hours.close, live: true };
+  const h = HOURS[r.id] || [540, 960];
+  return { open: h[0], close: h[1], live: false };
+};
+const fmtHM = (m) => { const h = Math.floor(m / 60), mm = m % 60, h12 = ((h + 11) % 12) + 1; return `${h12}${mm ? `:${String(mm).padStart(2, '0')}` : ''}${h < 12 ? 'a' : 'p'}`; };
+const hoursText = (r) => { const h = hoursFor(r); return `${fmtHM(h.open)}–${fmtHM(h.close)}`; };
+// Most recent time lifts were running (server remembers it; this device keeps a copy too).
+function lastOpenOf(r, st) {
+  const key = `wp:lastopen:${r.id}`;
+  let mine = null; try { mine = JSON.parse(localStorage.getItem(key) || 'null'); } catch {}
+  if (st && st.open > 0) { mine = { open: st.open, total: st.total, at: new Date().toISOString() }; try { localStorage.setItem(key, JSON.stringify(mine)); } catch {} }
+  const srv = st?.lastOpen || null;
+  const best = [mine, srv].filter(Boolean).sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0] || null;
+  return best && Date.now() - Date.parse(best.at) < 14 * 864e5 ? best : null;
+}
+const whenShort = (iso) => { const d = new Date(iso), t = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(' ', '').toLowerCase();
+  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(iso).setHours(0, 0, 0, 0)) / 864e5);
+  return days <= 0 ? t : days === 1 ? `yest. ${t}` : d.toLocaleDateString('en-US', { weekday: 'short' }) + ` ${t}`; };
+
 function statusInfo(r) {
   const st = statusCache.get(r.id)?.data;
   const op = openingFor({ ...r, opening: r.opening || (st && st.opening) || null });
   const opening = op.date;
-  const future = opening > todayIso();
+  const last = lastOpenOf(r, st && !st.error ? st : null);
+  // Season is open if the opening date has passed or lifts have actually run recently (beats a stale date).
+  const seasonOpen = opening <= todayIso() || !!last;
+  const future = !seasonOpen;
   const when = `${op.est ? '~' : ''}${fmtDate(opening)}`;
   const opensNote = op.typical ? 'Typical date' : op.est ? 'Projected' : 'Announced';
+  const h = hoursFor(r), nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  const hrs = `Lifts ${fmtHM(h.open)}–${fmtHM(h.close)}`;
   if (st && !st.error && st.found !== false && st.total > 0) {
     const why = (st.reasons || []).map((x) => `${x.text}${x.n > 1 ? ` ×${x.n}` : ''}`).join(', ');
     if (st.open > 0) {
-      return { cls: 'open', text: `Open · ${st.open}/${st.total} lifts`, note: st.hold ? `${st.hold} on hold${why ? ` (${why})` : ''}` : `Opened ${fmtDate(opening)}` };
+      return { cls: 'open', text: `Open · ${st.open}/${st.total} lifts`, note: st.hold ? `${st.hold} on hold${why ? ` (${why})` : ''}` : `until ${fmtHM(h.close)}`, pctOf: [st.open, st.total] };
     }
     if (st.hold > 0) return { cls: 'hold', text: `On hold · ${st.hold} lift${st.hold > 1 ? 's' : ''} paused`, note: why || 'Usually wind or weather — check the resort' };
     if (future) return { cls: 'closed', text: `Closed · Opens ${when}`, note: opensNote };
-    if (st.scheduled > 0) return { cls: 'sched', text: `Opening soon · ${st.scheduled} lifts scheduled today` };
-    return { cls: 'closed', text: 'Closed', note: why || `All lifts closed right now · season opened ${fmtDate(opening)}` };
+    // Season's open but lifts aren't spinning right now (night, before opening bell): show the latest count.
+    const next = nowMin < h.open ? `Opens ${fmtHM(h.open)}` : `Opens ${fmtHM(h.open)} tomorrow`;
+    if (last) return { cls: 'open', text: `${last.open}/${last.total} lifts`, note: `${next} · as of ${whenShort(last.at)}`, pctOf: [last.open, last.total], idle: true };
+    if (st.scheduled > 0) return { cls: 'sched', text: `${next} · ${st.scheduled} lifts scheduled`, note: hrs };
+    return { cls: 'closed', text: nowMin >= h.open && nowMin < h.close ? 'Lifts closed now' : next, note: why || `season opened ${fmtDate(opening)} · ${hrs}` };
   }
   if (future) return { cls: 'closed', text: `Closed · Opens ${when}`, note: opensNote };
   if (!st) return { cls: 'muted', text: 'Checking status…' };
-  return { cls: 'muted', text: `${op.est ? 'Season usually opens' : 'Season opened'} ${fmtDate(opening)}`, note: 'Live lift status unavailable' };
+  if (last) return { cls: 'open', text: `${last.open}/${last.total} lifts open`, note: `last report ${whenShort(last.at)} · ${hrs}`, pctOf: [last.open, last.total], idle: true };
+  return { cls: 'muted', text: `${op.est ? 'Season usually opens' : 'Season opened'} ${fmtDate(opening)}`, note: `${hrs} · live lift status unavailable` };
 }
 
 function statusLine(r) {
   const s = statusInfo(r);
   const st = statusCache.get(r.id)?.data;
-  const pct = s.cls === 'open' && st?.total ? Math.round((st.open / st.total) * 100) : null;
-  if (pct != null) return `<span class="spie" style="--p:${pct}" title="${pct}% of lifts open"></span><span class="stext ${s.cls}">${esc(s.text)}</span>${s.note ? `<span class="snote"> · ${esc(s.note)}</span>` : ''}`;
+  const pct = s.pctOf && s.pctOf[1] ? Math.round((s.pctOf[0] / s.pctOf[1]) * 100) : null;
+  if (pct != null) return `<span class="spie${s.idle ? ' idle' : ''}" style="--p:${pct}" title="${pct}% of lifts open"></span><span class="stext ${s.cls}">${esc(s.text)}</span>${s.note ? `<span class="snote"> · ${esc(s.note)}</span>` : ''}`;
   return `<span class="sdot ${s.cls}"></span><span class="stext ${s.cls}">${esc(s.text)}</span>${s.note ? `<span class="snote"> · ${esc(s.note)}</span>` : ''}`;
 }
 

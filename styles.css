@@ -1105,3 +1105,4 @@ html[data-theme="light"] .ptr-spin .sp { fill: #8e8e93; }
 .ptr { top: calc(var(--tb-h, 60px) + 6px); transform: translateY(calc(var(--pull, 0px) * .5 - 6px)); z-index: 5; transition: opacity .25s; }
 .ptr.held { transform: translateY(8px); transition: opacity .25s, transform .35s cubic-bezier(.2,.8,.2,1); }
 #app { will-change: transform; }
+.spie.idle { opacity: .6; }

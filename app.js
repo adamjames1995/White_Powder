@@ -82,7 +82,7 @@ async function refresh(force = false) {
   refreshBtn?.classList.add('spin');
   try {
     stage('requesting forecast');
-    const data = await loadAll(RESORTS);
+    const data = await loadAll(RESORTS, force ? { timeoutMs: 12000 } : {});
     stage('drawing');
     state = { data, fetchedAt: Date.now(), error: null };
     queueLoad(EXTRA);
@@ -97,10 +97,10 @@ async function refresh(force = false) {
 }
 
 /** Fetch forecasts in chunks of 8 mountains (16 points) so each request stays light. */
-async function loadAll(list) {
+async function loadAll(list, extra = {}) {
   const chunks = [];
   for (let i = 0; i < list.length; i += 8) chunks.push(list.slice(i, i + 8));
-  const results = await Promise.allSettled(chunks.map((c) => loadResorts(c, { onStage: stage })));
+  const results = await Promise.allSettled(chunks.map((c) => loadResorts(c, { onStage: stage, ...extra })));
   const data = {};
   let err = null;
   results.forEach((r) => { if (r.status === 'fulfilled') Object.assign(data, r.value); else err = r.reason; });
@@ -113,6 +113,22 @@ async function loadAll(list) {
 // pass-view cards stuck on "Loading forecast…". Batches of 4 run one after another and failures back off and retry.
 const loadQ = { ids: new Set(), running: false, fails: new Map() };
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+// Haptic tick. Android: Vibration API. iPhone (iOS 18+): Safari has no vibrate(), but toggling a native
+// <input switch> plays the system haptic — so we click a hidden one. iOS only allows it during a touch.
+const haptic = (() => {
+  let lbl = null;
+  return (ms = 10) => {
+    try {
+      if (navigator.vibrate && navigator.vibrate(ms)) return;
+      if (!lbl) {
+        lbl = document.createElement('label'); lbl.setAttribute('aria-hidden', 'true');
+        lbl.style.cssText = 'position:fixed;left:-100px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden';
+        lbl.innerHTML = '<input type="checkbox" switch tabindex="-1">'; document.body.appendChild(lbl);
+      }
+      lbl.click();
+    } catch {}
+  };
+})();
 let rerenderTimer = 0;
 function rerenderHomeSoon() {
   clearTimeout(rerenderTimer);
@@ -1466,7 +1482,7 @@ function sortable(list, itemSel, { handle, longPress = 0, onDrop }) {
     els.forEach((el) => { if (el !== item) el.style.transition = EASE; });
     item.style.transition = 'box-shadow .15s';
     item.classList.add('dragging'); list.classList.add('sorting');
-    if (navigator.vibrate) navigator.vibrate(12);
+    haptic(12);
     const loop = () => {
       if (!sortActive) return;
       const edge = 80;
@@ -1485,6 +1501,7 @@ function sortable(list, itemSel, { handle, longPress = 0, onDrop }) {
     const center = (tops[idx0] + bottoms[idx0]) / 2 + dy;
     let target = 0;
     els.forEach((el, i) => { if (i !== idx0 && (tops[i] + bottoms[i]) / 2 < center) target++; });
+    if (snap.target !== target) haptic(6); // tick each time a card moves out of the way
     snap.target = target;
     els.forEach((el, i) => {
       if (i === idx0) return;
@@ -1495,6 +1512,7 @@ function sortable(list, itemSel, { handle, longPress = 0, onDrop }) {
   };
   const finish = () => {
     const { els, tops, bottoms, idx0, target } = snap;
+    haptic(10);
     const finalTop = target > idx0 ? bottoms[target] - (bottoms[idx0] - tops[idx0]) : target < idx0 ? tops[target] : tops[idx0];
     item.style.transition = EASE;
     item.style.transform = `translateY(${finalTop - tops[idx0]}px)`;
@@ -3253,37 +3271,59 @@ window.addEventListener('resize', applyX);
 
 // ---------- pull down to refresh (iOS home-screen apps have no built-in one) ----------
 async function hardRefresh() {
+  const before = state.fetchedAt;
   statusCache.clear(); snotelCache.clear(); obsPending.clear(); camsCache.clear(); modelDepth.clear(); loadQ.fails.clear();
-  await refresh(true);
+  // never leave the spinner hanging: give the forecast service ~15 s, keep the saved forecast if it's slow
+  await Promise.race([refresh(true), sleep(15000)]);
+  if (location.hash.startsWith('#/resort/')) safeRender();
+  const ok = state.fetchedAt !== before && !state.error;
+  if (!ok) state.error = null;
+  miniToast(ok ? 'Updated just now' : 'Forecast service is slow right now — showing your saved forecast. Lift status refreshed.');
+  if (!ok) safeRender();
+}
+function miniToast(text) {
+  document.querySelector('.mini-toast')?.remove();
+  const t = document.createElement('div'); t.className = 'mini-toast'; t.textContent = text; document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('in')); setTimeout(() => { t.classList.remove('in'); setTimeout(() => t.remove(), 300); }, 2600);
 }
 (() => {
   const ind = document.createElement('div');
-  ind.className = 'ptr'; ind.innerHTML = '<span class="ptr-ic">↓</span>';
+  ind.className = 'ptr';
+  ind.innerHTML = `<svg class="ptr-spin" viewBox="0 0 40 40" aria-hidden="true">${Array.from({ length: 12 }, (_, i) => `<rect class="sp" style="--i:${i}" x="18.5" y="4" width="3" height="10" rx="1.5" transform="rotate(${i * 30} 20 20)"/>`).join('')}</svg>`;
+  let wasReady = false;
   document.body.appendChild(ind);
   const TRIGGER = 70;
-  let y0 = null, pull = 0, busy = false;
-  const blocked = (t) => sortActive || busy || document.querySelector('.tour, .modal') || (t instanceof Element && t.closest('.modal, .cam-frame, .leaflet-container, [data-strip]'));
+  let y0 = null, x0 = 0, pull = 0, busy = false;
+  const blocked = (t) => sortActive || busy || document.querySelector('.tour, .modal') || (t instanceof Element && t.closest('.modal, .cam-frame, .leaflet-container, .maplibregl-canvas, .av3d'));
   const show = (d) => {
     ind.style.setProperty('--pull', `${Math.min(d, TRIGGER * 1.4)}px`);
-    ind.classList.toggle('ready', d >= TRIGGER);
-    ind.style.opacity = String(Math.min(1, d / TRIGGER));
+    const ready = d >= TRIGGER;
+    if (ready && !wasReady && !busy) haptic(8);
+    wasReady = ready;
+    ind.classList.toggle('ready', ready);
+    // spokes appear one by one as you pull, like iOS
+    const n = Math.round(Math.min(1, d / TRIGGER) * 12);
+    ind.querySelectorAll('.sp').forEach((el, i) => el.classList.toggle('on', i < n || busy));
+    ind.style.opacity = String(Math.min(1, d / (TRIGGER * 0.5)));
   };
   document.addEventListener('touchstart', (e) => {
-    y0 = window.scrollY <= 0 && e.touches.length === 1 && !blocked(e.target) ? e.touches[0].clientY : null; pull = 0;
+    y0 = window.scrollY <= 0 && e.touches.length === 1 && !blocked(e.target) ? e.touches[0].clientY : null; x0 = e.touches[0]?.clientX || 0; pull = 0;
   }, { passive: true });
   document.addEventListener('touchmove', (e) => {
     if (y0 == null) return;
     if (window.scrollY > 0) { y0 = null; show(0); return; }
-    pull = Math.max(0, (e.touches[0].clientY - y0) * 0.5);
+    const dy = e.touches[0].clientY - y0, dx = e.touches[0].clientX - x0;
+    if (pull < 8 && Math.abs(dx) > Math.abs(dy)) { y0 = null; show(0); return; } // sideways swipe on a snow strip: not a pull
+    pull = Math.max(0, dy * 0.5);
     show(pull);
   }, { passive: true });
   document.addEventListener('touchend', async () => {
     if (y0 == null) return;
     y0 = null;
     if (pull < TRIGGER) { ind.style.opacity = '0'; show(0); return; }
-    busy = true; ind.classList.add('spin'); ind.firstChild.textContent = '↻'; show(TRIGGER);
+    busy = true; ind.classList.add('spin'); haptic(12); show(TRIGGER);
     try { await hardRefresh(); } finally {
-      busy = false; ind.classList.remove('spin', 'ready'); ind.firstChild.textContent = '↓'; ind.style.opacity = '0'; show(0);
+      busy = false; ind.classList.remove('spin', 'ready'); ind.style.opacity = '0'; show(0);
     }
   }, { passive: true });
 })();

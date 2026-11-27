@@ -1088,3 +1088,15 @@ html[data-holiday="groundhog"], html[data-holiday="mardigras"], html[data-holida
   60% { transform: translate(calc(var(--dx) * .6 - var(--sw)), 62vh); } 90% { opacity: .9; } 100% { transform: translate(var(--dx), 108vh); opacity: .7; } }
 @keyframes holtumble { 0% { transform: rotateX(0) rotateY(0) rotateZ(-25deg); } 50% { transform: rotateX(55deg) rotateY(25deg) rotateZ(15deg); } 100% { transform: rotateX(-30deg) rotateY(160deg) rotateZ(45deg); } }
 .hol-fx i b svg { display: block; filter: drop-shadow(0 2px 2px rgba(0,0,0,.25)); }
+.mini-toast { position: fixed; left: 50%; top: calc(var(--tb-h, 60px) + 10px); z-index: 80; max-width: 86vw; transform: translate(-50%, -12px); opacity: 0; transition: opacity .25s, transform .3s;
+  padding: 9px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; color: #fff; background: rgba(20,20,22,.82); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
+.mini-toast.in { opacity: 1; transform: translate(-50%, 0); }
+/* pull to refresh: classic grey spoke spinner, no bubble */
+.ptr { background: none; border: 0; box-shadow: none; width: 30px; height: 30px; margin-left: -15px; transition: opacity .2s; }
+.ptr-spin { width: 30px; height: 30px; display: block; }
+.ptr-spin .sp { fill: #a7a7ad; opacity: 0; transition: opacity .12s; }
+.ptr-spin .sp.on { opacity: calc(1 - var(--i) * 0.07); }
+.ptr.spin .ptr-spin { animation: ptrspin 1s steps(12) infinite; }
+.ptr.spin .ptr-spin .sp { opacity: calc(1 - var(--i) * 0.07); }
+@keyframes ptrspin { to { transform: rotate(360deg); } }
+html[data-theme="light"] .ptr-spin .sp { fill: #8e8e93; }

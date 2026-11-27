@@ -449,10 +449,10 @@ function scheduleResort() {
 }
 
 const delBtn = (r) => (r.extra || (localStorage.getItem(VIEW_KEY) || 'fav') !== 'fav' ? '' : `<button class="sw-del" data-del="${r.id}" aria-label="Remove ${esc(r.name)}">🗑<span>Remove</span></button>`);
+// "Remove" only takes a mountain off your favorites. It stays in the app (Epic/Ikon views, the
+// "+" list, Settings → My mountains) so it can always be starred again.
 function removeMountain(id) {
-  const i = RESORTS.findIndex((r) => r.id === id);
-  if (i < 0) return;
-  RESORTS.splice(i, 1); saveMountains(RESORTS);
+  if (!RESORTS.some((r) => r.id === id)) return;
   FAVS.delete(id); saveFavorites(FAVS);
   const p = getPrefs(); p.resorts = p.resorts.filter((x) => x !== id); setPrefs(p); syncSub();
 }
@@ -1598,14 +1598,14 @@ function renderManage() {
   app.innerHTML = `
     <div class="mhead"><a class="back" href="#/">‹ Done</a><h1 class="title">My mountains</h1></div>
     <section class="section">
-      <h3>Your list · ★ = favorite · drag ☰ to reorder</h3>
+      <h3>All your mountains · tap ★ to show on your home list · drag ☰ to reorder</h3><p class="small muted" style="margin:-4px 0 8px">Removing a mountain from your home list just un-stars it. It always stays here.</p>
       <div id="mylist">${RESORTS.length ? RESORTS.map((r, i) => `
         <div class="mrow" data-id="${r.id}">
           <span class="grip" aria-label="Drag to reorder" title="Drag to reorder">☰</span>
           <button class="star ${FAVS.has(r.id) ? 'on' : ''}" data-act="fav" aria-label="Favorite">${FAVS.has(r.id) ? '★' : '☆'}</button>
           <div class="mname"><b>${esc(r.name)}</b><span class="small muted">${esc([r.state, r.country].filter(Boolean).join(', '))}</span><span class="small muted">${r.baseFt.toLocaleString()}–${r.summitFt.toLocaleString()} ft${r.snotel ? ' · SNOTEL' : ''}</span></div>
           <button class="ib" data-act="edit" aria-label="Edit elevations">✎</button>
-          <button class="ib del" data-act="del" aria-label="Delete">🗑</button>
+
         </div>`).join('') : '<p class="small muted">No mountains yet — add some below.</p>'}</div>
     </section>
     <section class="section">
@@ -1678,11 +1678,7 @@ function renderManage() {
     if (act === 'fav') toggleFav(id);
     if (act === 'up' && i > 0) [RESORTS[i - 1], RESORTS[i]] = [RESORTS[i], RESORTS[i - 1]];
     if (act === 'down' && i < RESORTS.length - 1) [RESORTS[i + 1], RESORTS[i]] = [RESORTS[i], RESORTS[i + 1]];
-    if (act === 'del') {
-      if (!confirm(`Remove ${r.name}?`)) return;
-      RESORTS.splice(i, 1); FAVS.delete(id); saveFavorites(FAVS);
-      const p = getPrefs(); p.resorts = p.resorts.filter((x) => x !== id); setPrefs(p); syncSub();
-    }
+    if (act === 'del') removeMountain(id); // unfavorite only — never deleted from the app
     if (act === 'edit') {
       const base = prompt(`${r.name} — base elevation (ft)`, r.baseFt);
       if (base === null) return;

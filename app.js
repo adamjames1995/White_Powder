@@ -385,7 +385,7 @@ function askHome() {
       <div id="sp-res" class="sp-res">${cur ? `<p class="small muted">Now: ${esc(cur.label)}</p>` : ''}</div>`);
     const input = m.querySelector('#sp-q'), res = m.querySelector('#sp-res');
     let done = false, timer = 0, seq = 0;
-    const finish = (h) => { if (done) return; done = true; m.remove(); if (h) setHome({ lat: h.lat, lon: h.lon, label: h.label }); resolve(h || null); };
+    const finish = (h) => { if (done) return; done = true; m.remove(); if (h) setHome({ lat: h.lat, lon: h.lon, label: h.label, ...(h.gps ? { gps: true, at: Date.now() } : {}) }); resolve(h || null); };
     m.querySelector('#sp-x').onclick = () => finish(null);
     m.addEventListener('click', (e) => { if (e.target === m) finish(null); });
     setTimeout(() => input.focus(), 50);
@@ -406,7 +406,7 @@ function askHome() {
       if (!navigator.geolocation) return show([], 'Location isn\'t available on this device.');
       res.innerHTML = '<p class="small muted">Finding you…</p>';
       navigator.geolocation.getCurrentPosition(
-        (p) => finish({ lat: p.coords.latitude, lon: p.coords.longitude, label: 'your location' }),
+        async (p) => finish({ lat: p.coords.latitude, lon: p.coords.longitude, label: (await placeName(p.coords.latitude, p.coords.longitude)) || 'your location', gps: true }),
         () => show([], 'Couldn\'t get your location — allow it in Settings, or type an address.'),
         { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
     };
@@ -2763,17 +2763,40 @@ function renderDrive() {
   planDrive(dest, Number(p.day) || 0, chair);
 }
 
+// Short town name for a point ("Livermore, CA"), so you can see where a drive starts.
+async function placeName(lat, lon) {
+  try {
+    const pr = (await (await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}`)).json()).features?.[0]?.properties || {};
+    const town = pr.city || pr.town || pr.village || pr.district || pr.county || pr.name;
+    const st = ABBR[pr.state] || pr.state || '';
+    return [town, st].filter(Boolean).join(', ');
+  } catch { return ''; }
+}
+// "Your location" is live: GPS-based starting points refresh when they're more than 15 min old
+// (a saved spot from days ago gave 16-hour drives). Typed addresses stay as set.
 async function ftOrigin() {
   const h = getHome();
-  if (h) return [h.lat, h.lon];
-  const g = await new Promise((res) => navigator.geolocation ? navigator.geolocation.getCurrentPosition((x) => res([x.coords.latitude, x.coords.longitude]), () => res(null), { timeout: 10000, maximumAge: 600000 }) : res(null));
-  if (g) setHome({ lat: g[0], lon: g[1], label: 'your location' });
-  return g;
+  const live = !h || h.gps || h.label === 'your location';
+  if (h && !live) return [h.lat, h.lon];
+  if (h && h.at && Date.now() - h.at < 15 * 60e3) return [h.lat, h.lon];
+  const g = await new Promise((res) => navigator.geolocation ? navigator.geolocation.getCurrentPosition((x) => res([x.coords.latitude, x.coords.longitude]), () => res(null), { enableHighAccuracy: false, timeout: 10000, maximumAge: 5 * 60e3 }) : res(null));
+  if (g) {
+    const moved = !h || Math.hypot(g[0] - h.lat, g[1] - h.lon) > 0.01;
+    const label = moved || !h || h.label === 'your location' ? (await placeName(g[0], g[1])) || 'your location' : h.label;
+    setHome({ lat: g[0], lon: g[1], label, gps: true, at: Date.now() });
+    if (moved || label !== h?.label) { const b = document.getElementById('ft-from'); if (b) b.textContent = `📍 From ${label} · change`; }
+    return g;
+  }
+  return h ? [h.lat, h.lon] : null;
 }
 
+let ftGen = 0;
 async function planDrive(dest, dayOffset, chair) {
+  // Each plan gets a ticket; if you switch mountain/day/time while a slow plan is still loading,
+  // the old one must not paint over the new selection (that showed Whistler's 16-h drive under "Palisades").
+  const gen = ++ftGen;
   const body = () => document.getElementById('ft-body');
-  const stillHere = () => location.hash.startsWith('#/drive') && body();
+  const stillHere = () => gen === ftGen && location.hash.startsWith('#/drive') && body();
   const from = await ftOrigin();
   if (!stillHere()) return;
   if (!from) { body().innerHTML = '<div class="card pad"><p>Set where you\'re starting from (📍 above) to plan the drive.</p></div>'; return; }
@@ -2801,7 +2824,7 @@ async function planDrive(dest, dayOffset, chair) {
         const name = pt.frac === 1 ? dest.name : near && near.d < 0.05 ? titleCase(near.n.place || near.n.name || '') : `Mile ${Math.round(pt.frac * base.routes[0].km * 0.621)}`;
         return { ...pt, name, elevFt: Math.round((w.elevation || 0) * 3.281), hourly: { t: w.hourly.time.map((x) => x * 1000), snow: w.hourly.snowfall, temp: w.hourly.temperature_2m, precip: w.hourly.precipitation, code: w.hourly.weather_code } };
       }).filter(Boolean);
-      d = { at: Date.now(), base, times, samples };
+      d = { at: Date.now(), base, times, samples: samples.filter(Boolean) }; // a failed weather lookup must not break the plan
       ftCache.set(key, d);
     }
   } catch (e) {
@@ -2836,7 +2859,7 @@ async function planDrive(dest, dayOffset, chair) {
   const aUrl = appleMapsUrl(from, dest.name, null);
   const fmtT = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const highest = [...samples].sort((a, b) => b.elevFt - a.elevFt).slice(0, 3);
-  const wxRows = [...new Set([...highest, samples[samples.length - 1]])].sort((a, b) => a.frac - b.frac).map((s) => {
+  const wxRows = [...new Set([...highest, samples[samples.length - 1]])].filter(Boolean).sort((a, b) => a.frac - b.frac).map((s) => {
     const eta = plan.leave + s.frac * plan.driveMin * 60e3;
     const i = Math.max(0, s.hourly.t.findIndex((t) => t > eta) - 1);
     const snow = s.hourly.snow[i] || 0, temp = Math.round(s.hourly.temp[i]);
@@ -2845,11 +2868,11 @@ async function planDrive(dest, dayOffset, chair) {
   }).join('');
   body().innerHTML = `
     <section class="card pad ft-verdict">
-      <div class="seg-ctl ai-seg ft-goals" id="ft-goal">${Object.entries(GOALS).map(([k, g]) => `<button data-g="${k}" class="${k === goal ? 'on' : ''}">${g.short}</button>`).join('')}</div>
       <div class="ft-leave-k">${plan.late ? 'Leave now' : `Leave by · ${GOALS[goal].label}`}</div>
       <div class="ft-leave">${plan.late ? fmtT(Date.now()) : fmtT(plan.leave)}</div>
       <ul class="ft-reasons">${plan.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
-      <div class="ft-allgoals">${Object.entries(GOALS).map(([k, g]) => `<button data-g="${k}" class="${k === goal ? 'on' : ''}"><span>${g.short}</span><b>${plans[k].late ? 'Now' : fmtT(plans[k].leave)}</b></button>`).join('')}</div>
+      ${route.min > 540 ? `<p class="small ft-far">Starting from <b>${esc(getHome()?.label || 'your location')}</b> — that's ${Math.round(route.min / 60)}+ hours away. Not right? <button class="linkbtn" id="ft-fix">Change start</button></p>` : ''}
+      <div class="ft-allgoals ft-goals" id="ft-goal">${Object.entries(GOALS).map(([k, g]) => `<button data-g="${k}" class="${k === goal ? 'on' : ''}"><span>${g.short}</span><b>${plans[k].late ? 'Now' : fmtT(plans[k].leave)}</b></button>`).join('')}</div>
       ${!base.traffic ? '<p class="small muted">Traffic isn\'t included yet (needs the free TomTom key).</p>' : ''}
       ${pow.best ? `<div class="ft-pow">❄️ Powder pick: <b>${pow.best.day === dayStart ? 'this day' : new Date(pow.best.day).toLocaleDateString('en-US', { weekday: 'long' })}</b> — ${pow.best.overnight.toFixed(0)}" overnight at ${esc(dest.name)}${pow.best.road >= 1 ? `, ${pow.best.road.toFixed(0)}" on the road that morning` : ', roads mostly clear'}.</div>` : ''}
     </section>
@@ -2884,6 +2907,7 @@ async function planDrive(dest, dayOffset, chair) {
       <p class="small muted">Google Maps follows each route exactly. Apple Maps links can only take a start and destination, so Apple picks its own route.</p></section>
     ${base.cams.length ? `<section class="section"><h3>Cams along the way</h3><div class="ft-cams">${base.cams.map((c, i) => `<button class="ft-cam" data-cam="${i}"><img src="${esc(c.img)}" alt="" loading="lazy" onerror="this.closest('.ft-cam').remove()"/><span>${esc(titleCase(c.name || ''))}</span></button>`).join('')}</div></section>` : ''}
     <p class="small muted ft-src">Road data: ${[chains.length && 'Caltrans', passes.length && 'WSDOT', bc && 'DriveBC'].filter(Boolean).join(', ') || '—'} · Weather: Open-Meteo · ${base.traffic ? 'Traffic: TomTom' : 'Routing: OSRM'} · as of ${fmtT(Date.parse(base.fetchedAt))}</p>`;
+  document.getElementById('ft-fix')?.addEventListener('click', async () => { if (await askHome()) { ftCache.clear(); renderDrive(); } });
   body().querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => { setFt({ goal: b.dataset.g }); planDrive(dest, dayOffset, chair); }));
   body().querySelectorAll('.ft-route').forEach((el) => el.addEventListener('click', (e) => {
     if (e.target.closest('a')) return;
